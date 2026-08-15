@@ -1,0 +1,49 @@
+# Databases and downloaded media (chat history, never commit)
+*.db
+whatsapp-bridge/store/
+claude_desktop_config.json
+
+# Secrets
+.env
+*.env
+!.env.example
+
+# Build output
+*.exe
+*.exe.*
+
+# Backups and temporaries
+*.bak
+*.tmp
+~*
+
+# Logs
+*.log
+*.log.*
+qr.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Whisper models and audio (large, regenerated on demand)
+whisper-tool/models/
+whisper-tool/cache/
+*.ogg
+*.opus
+
+# Local operator scripts and notes: machine-specific, carry real contact data
+cobranca/
+whisper-tool/_antigos/
+whisper-tool/*.txt
+COMO_CONECTAR.md
+INICIAR_BRIDGE.bat
+contacts.json
+
+# Upstream demo screenshot (not ours)
+example-use.png*
+
+# Tooling
+.serena/
