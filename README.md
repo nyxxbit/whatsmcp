@@ -34,20 +34,63 @@ wabridge/             Clean-architecture rewrite of the bridge, in progress
 
 The bridge owns the WhatsApp session and writes to SQLite. The MCP server reads from it. They are separate processes, so restarting the MCP server never touches the session.
 
-## Quick start
+## Running the bridge
 
 ```bash
 cd whatsapp-bridge
 go build -o whatsapp-bridge .
-./whatsapp-bridge          # scan the QR code on first run
+./whatsapp-bridge
 ```
 
-The session persists in `store/whatsapp.db`; messages land in `store/messages.db`. The REST API listens on `:8080`.
+The bridge runs as a **system tray application on Windows** and writes its output to `bridge.log` rather than the terminal, so an empty console is expected. On first run it writes the pairing QR to `qr.png` and tries to open it in the default image viewer; if nothing opens, open that file manually and scan it from WhatsApp under *Linked devices*.
+
+The session persists in `store/whatsapp.db` and messages land in `store/messages.db`. The REST API listens on `:8080`.
+
+## Connecting an MCP client
+
+Start the server:
 
 ```bash
 cd whatsapp-mcp-server
 uv run main.py
 ```
+
+Then point your client at it. For Claude Desktop, add this to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "whatsapp": {
+      "command": "uv",
+      "args": [
+        "--directory", "/absolute/path/to/whatsmcp/whatsapp-mcp-server",
+        "run", "main.py"
+      ]
+    }
+  }
+}
+```
+
+Cursor uses the same shape in `.cursor/mcp.json`. Restart the client after editing.
+
+### Tools exposed
+
+| Tool | Purpose |
+| --- | --- |
+| `search_contacts` | Find contacts by name or number |
+| `list_chats` | List chats, with filters and sorting |
+| `get_chat` | Metadata for one chat |
+| `get_direct_chat_by_contact` | Find the direct chat with a contact |
+| `get_contact_chats` | Every chat a contact takes part in |
+| `list_messages` | Read messages, filtered by date, sender or content |
+| `get_message_context` | Messages around a given one |
+| `get_last_interaction` | Most recent message with a contact |
+| `send_message` | Send text to a contact or group |
+| `send_file` | Send an image, video, document or raw audio |
+| `send_audio_message` | Send a playable voice note |
+| `download_media` | Download media from a message and return the local path |
+
+Anything that can read your messages and send on your behalf deserves the same caution as any tool with access to private data: an LLM acting on message content it did not write can be steered by that content.
 
 ## Tests
 
@@ -56,13 +99,15 @@ cd whatsapp-bridge
 go test ./...
 ```
 
-The suite covers caption extraction, container unwrapping (including nested containers, asserting that media survives), non-media types and native events.
+The suite covers caption extraction, container unwrapping (including nested containers, asserting that media survives), non-media types, native events, and that media filenames derive from the message rather than the wall clock.
 
 ## Requirements
 
-- Go 1.24+
+- Go 1.25+
 - Python 3.11+ with [uv](https://docs.astral.sh/uv/)
 - CGO enabled (SQLite)
+- Windows for the tray and the QR auto-open; the bridge itself is otherwise portable
+- `whisper-tool` additionally needs ffmpeg and `faster-whisper` with a CUDA-capable GPU
 
 ## Credits
 
