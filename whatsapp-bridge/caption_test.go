@@ -50,7 +50,7 @@ var testStamp = time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
 func TestUnwrapMessage(t *testing.T) {
 	inner := &waProto.Message{ImageMessage: &waProto.ImageMessage{
 		Caption: proto.String("arrived at 08:02"),
-		URL:     proto.String("https://exemplo/imagem.enc"),
+		URL:     proto.String("https://example.invalid/image.enc"),
 	}}
 
 	cases := map[string]*waProto.Message{
@@ -121,7 +121,7 @@ func TestExtractTextContentEvent(t *testing.T) {
 	}
 
 	cancelled := &waProto.Message{EventMessage: &waProto.EventMessage{
-		Name:       proto.String("Reuniao"),
+		Name:       proto.String("Team sync"),
 		IsCanceled: proto.Bool(true),
 	}}
 	if got := extractTextContent(cancelled); !strings.Contains(got, "CANCELLED") {

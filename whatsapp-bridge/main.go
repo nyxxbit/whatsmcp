@@ -1091,12 +1091,12 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 }
 
 func main() {
-	// cwd = pasta do exe (store/, bridge.log, icon usam paths relativos)
+	// cwd = the exe folder, since store/, bridge.log and the icon use relative paths
 	if exe, err := os.Executable(); err == nil {
 		os.Chdir(filepath.Dir(exe))
 	}
 	// a -H=windowsgui build has no console: stdout/stderr go to bridge.log
-	rotateLog() // corta o log se ele tiver ficado gigante numa sessao anterior
+	rotateLog() // trim the log if a previous session left it oversized
 	if f, ferr := os.OpenFile("bridge.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); ferr == nil {
 		os.Stdout = f
 		os.Stderr = f
@@ -1113,7 +1113,7 @@ func main() {
 			rotateLog()
 		}
 	}()
-	// systray.Run segura a main thread; o bridge conecta em background (onReady)
+	// systray.Run holds the main thread, so the bridge connects in the background (onReady)
 	systray.Run(onReady, onExit)
 }
 
@@ -1122,14 +1122,14 @@ func onReady() {
 	systray.SetTooltip("WhatsApp Bridge")
 	mTitle := systray.AddMenuItem("WhatsApp Bridge", "")
 	mTitle.Disable()
-	mStatus = systray.AddMenuItem("Status: iniciando...", "Estado da conexao com o WhatsApp")
+	mStatus = systray.AddMenuItem("Status: starting...", "WhatsApp connection state")
 	mStatus.Disable()
 	systray.AddSeparator()
 	mConnect := systray.AddMenuItem("Connect / Reconnect", "Detects the current state and connects, showing a QR when logged out")
 	mLog := systray.AddMenuItem("View log", "Open the bridge log")
 	mFolder := systray.AddMenuItem("Open folder", "Open the bridge folder")
 	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Quit (stops the bridge)", "Encerra o bridge")
+	mQuit := systray.AddMenuItem("Quit (stops the bridge)", "Stop the bridge")
 
 	go runBridge() // connect in the background; the tray shows up immediately
 
@@ -1141,12 +1141,12 @@ func onReady() {
 		systray.Quit()
 	}()
 
-	// cliques do menu
+	// menu clicks
 	go func() {
 		for {
 			select {
 			case <-mConnect.ClickedCh:
-				go triggerConnect() // detecta estado e conecta/reconecta (QR se preciso)
+				go triggerConnect() // detect the state and connect or reconnect, pairing by QR when needed
 			case <-mLog.ClickedCh:
 				showLogTail() // open only the tail (never hangs, even on a large log)
 			case <-mFolder.ClickedCh:
@@ -1164,7 +1164,7 @@ func openPath(p string) {
 	exec.Command("rundll32", "url.dll,FileProtocolHandler", p).Start()
 }
 
-const logCapBytes = 1 << 20 // 1 MB: acima disso o log e cortado (historico vai p/ .1)
+const logCapBytes = 1 << 20 // 1 MB: past this the log is trimmed, previous contents kept in .1
 
 // rotateLog keeps bridge.log small: past the cap it copies the current contents to
 // bridge.log.1 and truncates the active one. Since the log is opened with O_APPEND, later
@@ -1246,14 +1246,14 @@ func doQRPair(client *whatsmeow.Client) {
 			if code, qerr := qr.Encode(evt.Code, qr.M); qerr == nil {
 				if werr := os.WriteFile("qr.png", code.PNG(), 0644); werr == nil {
 					if !opened {
-						fmt.Println(">>> QR starget em qr.png - abrindo no visualizador <<<")
+						fmt.Println(">>> QR written to qr.png, opening it in the default viewer <<<")
 						openPath("qr.png")
 						opened = true
 					}
 				}
 			}
 		case "success":
-			fmt.Println("\nConectado e autenticado com sucesso!")
+			fmt.Println("\nConnected and authenticated.")
 			os.Remove("qr.png")
 			refreshStatus()
 			return
@@ -1275,7 +1275,7 @@ func triggerConnect() {
 	c := globalClient
 	if c == nil {
 		connectMu.Unlock()
-		fmt.Println("Bridge ainda inicializando, tente em alguns segundos.")
+		fmt.Println("Bridge is still starting up, try again in a few seconds.")
 		return
 	}
 
@@ -1304,7 +1304,7 @@ func triggerConnect() {
 	// logged out: needs QR pairing
 	if qrActive {
 		connectMu.Unlock()
-		fmt.Println("Pareamento ja em andamento (veja qr.png).")
+		fmt.Println("Pairing already in progress, see qr.png.")
 		openPath("qr.png")
 		return
 	}
@@ -1381,10 +1381,10 @@ func runBridge() {
 	}
 	// Close is handled by onExit (systray); runBridge returns early, so no defer here
 
-	// Asynchronous processing: o handler do whatsmeow so enfileira (rapido) e um
-	// worker drains it in order. This keeps the dispatcher from stalling when a large history
-	// sync grande (antes dava "node handling taking long" de minutos, atrasando as
-	// mensagens reais). 1 worker = sem concorrencia de escrita no SQLite.
+	// Asynchronous processing: the whatsmeow handler only enqueues (cheap) and a single
+	// worker drains the queue in order. This keeps the dispatcher from stalling on a large
+	// history sync, which used to produce minutes-long "node handling taking long" warnings
+	// and delay live messages. One worker also means no concurrent SQLite writers.
 	eventQueue := make(chan interface{}, 4096)
 	go func() {
 		for evt := range eventQueue {
