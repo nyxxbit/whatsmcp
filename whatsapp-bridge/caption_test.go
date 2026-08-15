@@ -3,14 +3,14 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"google.golang.org/protobuf/proto"
 )
 
-// Legenda de midia. Antes desta correcao, uma foto legendada chegava ao banco com content
-// vazio e o dado escrito na legenda (horario de chegada da equipe, valor de nota, numero
-// da filial) simplesmente sumia.
+// Media captions. Before this fix, a captioned photo reached the store with empty content
+// and whatever was written in the caption was silently lost.
 func TestExtractTextContentCaption(t *testing.T) {
 	cases := []struct {
 		name string
@@ -42,42 +42,49 @@ func TestExtractTextContentCaption(t *testing.T) {
 	}
 }
 
-// Containers. O WhatsApp embrulha a mensagem real quando o chat tem mensagem temporaria
-// ligada, quando e visualizacao unica, quando o documento vai com legenda e quando a
-// mensagem foi edited. Sem desembrulhar, o bridge perde a MENSAGEM INTEIRA - texto e midia.
+// Containers. WhatsApp wraps the real message when the chat has disappearing messages
+// on, when the media is view-once, when a document carries a caption and when a message
+// was edited. Without unwrapping, the bridge loses the ENTIRE message: text and media.
+var testStamp = time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+
 func TestUnwrapMessage(t *testing.T) {
-	dentro := &waProto.Message{ImageMessage: &waProto.ImageMessage{
+	inner := &waProto.Message{ImageMessage: &waProto.ImageMessage{
 		Caption: proto.String("arrived at 08:02"),
 		URL:     proto.String("https://exemplo/imagem.enc"),
 	}}
 
 	cases := map[string]*waProto.Message{
-		"ephemeral":      {EphemeralMessage: &waProto.FutureProofMessage{Message: dentro}},
-		"view once":      {ViewOnceMessage: &waProto.FutureProofMessage{Message: dentro}},
-		"view once v2":   {ViewOnceMessageV2: &waProto.FutureProofMessage{Message: dentro}},
-		"doc with caption": {DocumentWithCaptionMessage: &waProto.FutureProofMessage{Message: dentro}},
-		"edited":        {EditedMessage: &waProto.FutureProofMessage{Message: dentro}},
+		"ephemeral":        {EphemeralMessage: &waProto.FutureProofMessage{Message: inner}},
+		"view once":        {ViewOnceMessage: &waProto.FutureProofMessage{Message: inner}},
+		"view once v2":     {ViewOnceMessageV2: &waProto.FutureProofMessage{Message: inner}},
+		"doc with caption": {DocumentWithCaptionMessage: &waProto.FutureProofMessage{Message: inner}},
+		"edited":           {EditedMessage: &waProto.FutureProofMessage{Message: inner}},
 	}
-	for name, msg := range cases {
+	for label, msg := range cases {
 		if got := extractTextContent(msg); got != "arrived at 08:02" {
-			t.Errorf("%s: text was %q", name, got)
+			t.Errorf("%s: text was %q", label, got)
 		}
-		mediaType, _, url, _, _, _, _ := extractMediaInfo(msg)
+		mediaType, name, url, _, _, _, _ := extractMediaInfo(msg, testStamp, "3EB0ABCD1234")
 		if mediaType != "image" || url == "" {
-			t.Errorf("%s: media lost (type=%q url=%q)", name, mediaType, url)
+			t.Errorf("%s: media lost (type=%q url=%q)", label, mediaType, url)
+		}
+		// the filename must come from the message, never from the wall clock:
+		// a history sync processes hundreds of messages within the same second
+		if !strings.Contains(name, "20260814_120000") || !strings.HasSuffix(name, "1234.jpg") {
+			t.Errorf("%s: filename %q is not derived from the message", label, name)
 		}
 	}
 
 	// ephemeral inside view-once: nesting must hold
-	duplo := &waProto.Message{EphemeralMessage: &waProto.FutureProofMessage{
-		Message: &waProto.Message{ViewOnceMessageV2: &waProto.FutureProofMessage{Message: dentro}}}}
-	if got := extractTextContent(duplo); got != "arrived at 08:02" {
+	nested := &waProto.Message{EphemeralMessage: &waProto.FutureProofMessage{
+		Message: &waProto.Message{ViewOnceMessageV2: &waProto.FutureProofMessage{Message: inner}}}}
+	if got := extractTextContent(nested); got != "arrived at 08:02" {
 		t.Errorf("nested: got %q", got)
 	}
 }
 
-// Tipos sem midia que carregam informacao util na obra.
-func TestExtractTextContentSemMidia(t *testing.T) {
+// Non-media types that still carry useful content.
+func TestExtractTextContentNonMedia(t *testing.T) {
 	loc := &waProto.Message{LocationMessage: &waProto.LocationMessage{
 		DegreesLatitude:  proto.Float64(37.4220),
 		DegreesLongitude: proto.Float64(-122.0841),
@@ -101,9 +108,9 @@ func TestExtractTextContentSemMidia(t *testing.T) {
 	}
 }
 
-// Evento nativo do WhatsApp - o buraco da issue #310 do lharries/whatsapp-mcp: o evento e
-// criado no grupo mas a leitura nao devolve nada, e o usuario ve um texto solto no lugar.
-func TestExtractTextContentEvento(t *testing.T) {
+// Native WhatsApp events, the gap behind lharries/whatsapp-mcp#310: the event is created
+// in the group but reads return nothing, so the user sees a stray plain-text summary.
+func TestExtractTextContentEvent(t *testing.T) {
 	ev := &waProto.Message{EventMessage: &waProto.EventMessage{
 		Name:      proto.String("Quarterly site review"),
 		StartTime: proto.Int64(1786000000),
@@ -113,17 +120,17 @@ func TestExtractTextContentEvento(t *testing.T) {
 		t.Errorf("event: got %q", got)
 	}
 
-	cancelado := &waProto.Message{EventMessage: &waProto.EventMessage{
+	cancelled := &waProto.Message{EventMessage: &waProto.EventMessage{
 		Name:       proto.String("Reuniao"),
 		IsCanceled: proto.Bool(true),
 	}}
-	if got := extractTextContent(cancelado); !strings.Contains(got, "CANCELLED") {
+	if got := extractTextContent(cancelled); !strings.Contains(got, "CANCELLED") {
 		t.Errorf("cancelled event: got %q", got)
 	}
 
 	// must still surface from inside a container
-	dentro := &waProto.Message{EphemeralMessage: &waProto.FutureProofMessage{Message: ev}}
-	if got := extractTextContent(dentro); !strings.Contains(got, "Quarterly site review") {
+	inner := &waProto.Message{EphemeralMessage: &waProto.FutureProofMessage{Message: ev}}
+	if got := extractTextContent(inner); !strings.Contains(got, "Quarterly site review") {
 		t.Errorf("event inside ephemeral: got %q", got)
 	}
 }

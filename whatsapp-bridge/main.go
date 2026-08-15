@@ -398,11 +398,11 @@ func extractTextContent(msg *waProto.Message) string {
 	} else if st := msg.GetStickerMessage(); st != nil {
 		return "[sticker]"
 	} else if r := msg.GetReactionMessage(); r != nil {
-		alvo := ""
+		target := ""
 		if k := r.GetKey(); k != nil {
-			alvo = k.GetID()
+			target = k.GetID()
 		}
-		return fmt.Sprintf("[reaction %s to %s]", r.GetText(), alvo)
+		return fmt.Sprintf("[reaction %s to %s]", r.GetText(), target)
 	} else if ptv := msg.GetPtvMessage(); ptv != nil {
 		return "[round video] " + ptv.GetCaption()
 	} else if gi := msg.GetGroupInviteMessage(); gi != nil {
@@ -411,11 +411,11 @@ func extractTextContent(msg *waProto.Message) string {
 		return "[poll vote]"
 	} else if p := msg.GetProtocolMessage(); p != nil {
 		if p.GetType() == waProto.ProtocolMessage_REVOKE {
-			alvo := ""
+			target := ""
 			if k := p.GetKey(); k != nil {
-				alvo = k.GetID()
+				target = k.GetID()
 			}
-			return "[deleted message] " + alvo
+			return "[deleted message] " + target
 		}
 	}
 
@@ -509,7 +509,7 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 			mediaType = whatsmeow.MediaVideo
 			mimeType = "video/quicktime"
 
-		// Document types (mimetype correto p/ o WhatsApp pré-visualizar)
+		// Document types (correct mimetype so WhatsApp can render a preview)
 		case "pdf":
 			mediaType = whatsmeow.MediaDocument
 			mimeType = "application/pdf"
@@ -623,28 +623,54 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 	return true, fmt.Sprintf("Message sent to %s", recipient)
 }
 
-// Extract media info from a message
-func extractMediaInfo(msg *waProto.Message) (mediaType string, filename string, url string, mediaKey []byte, fileSHA256 []byte, fileEncSHA256 []byte, fileLength uint64) {
+// shortID trims a WhatsApp message ID to a filename-safe suffix.
+func shortID(id string) string {
+	id = strings.Map(func(r rune) rune {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return -1
+	}, id)
+	if len(id) > 8 {
+		return id[len(id)-8:]
+	}
+	if id == "" {
+		return "0"
+	}
+	return id
+}
+
+// Media metadata needed to fetch the file later: WhatsApp serves media by reference
+// (URL plus decryption key), never inline.
+//
+// The filename is derived from the message itself, not from the wall clock. Naming by
+// time.Now() with second resolution collides during a history sync, where hundreds of
+// messages are processed in the same second: two different photos would land on the same
+// path, and downloadMedia returns an existing file as a success, so the second message
+// would silently serve the first one's bytes.
+func extractMediaInfo(msg *waProto.Message, stamp time.Time, id string) (mediaType string, filename string, url string, mediaKey []byte, fileSHA256 []byte, fileEncSHA256 []byte, fileLength uint64) {
 	msg = unwrapMessage(msg)
 	if msg == nil {
 		return "", "", "", nil, nil, nil, 0
 	}
+	// message ID keeps the name unique even for messages sharing a timestamp
+	base := stamp.Format("20060102_150405") + "_" + shortID(id)
 
 	// Check for image message
 	if img := msg.GetImageMessage(); img != nil {
-		return "image", "image_" + time.Now().Format("20060102_150405") + ".jpg",
+		return "image", "image_" + base + ".jpg",
 			img.GetURL(), img.GetMediaKey(), img.GetFileSHA256(), img.GetFileEncSHA256(), img.GetFileLength()
 	}
 
 	// Check for video message
 	if vid := msg.GetVideoMessage(); vid != nil {
-		return "video", "video_" + time.Now().Format("20060102_150405") + ".mp4",
+		return "video", "video_" + base + ".mp4",
 			vid.GetURL(), vid.GetMediaKey(), vid.GetFileSHA256(), vid.GetFileEncSHA256(), vid.GetFileLength()
 	}
 
 	// Check for audio message
 	if aud := msg.GetAudioMessage(); aud != nil {
-		return "audio", "audio_" + time.Now().Format("20060102_150405") + ".ogg",
+		return "audio", "audio_" + base + ".ogg",
 			aud.GetURL(), aud.GetMediaKey(), aud.GetFileSHA256(), aud.GetFileEncSHA256(), aud.GetFileLength()
 	}
 
@@ -652,7 +678,7 @@ func extractMediaInfo(msg *waProto.Message) (mediaType string, filename string, 
 	if doc := msg.GetDocumentMessage(); doc != nil {
 		filename := doc.GetFileName()
 		if filename == "" {
-			filename = "document_" + time.Now().Format("20060102_150405")
+			filename = "document_" + base
 		}
 		return "document", filename,
 			doc.GetURL(), doc.GetMediaKey(), doc.GetFileSHA256(), doc.GetFileEncSHA256(), doc.GetFileLength()
@@ -660,11 +686,11 @@ func extractMediaInfo(msg *waProto.Message) (mediaType string, filename string, 
 
 	// Stickers and round videos are downloadable media too
 	if st := msg.GetStickerMessage(); st != nil {
-		return "sticker", "sticker_" + time.Now().Format("20060102_150405") + ".webp",
+		return "sticker", "sticker_" + base + ".webp",
 			st.GetURL(), st.GetMediaKey(), st.GetFileSHA256(), st.GetFileEncSHA256(), st.GetFileLength()
 	}
 	if ptv := msg.GetPtvMessage(); ptv != nil {
-		return "video", "ptv_" + time.Now().Format("20060102_150405") + ".mp4",
+		return "video", "ptv_" + base + ".mp4",
 			ptv.GetURL(), ptv.GetMediaKey(), ptv.GetFileSHA256(), ptv.GetFileEncSHA256(), ptv.GetFileLength()
 	}
 
@@ -690,7 +716,7 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 	content := extractTextContent(msg.Message)
 
 	// Extract media info
-	mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength := extractMediaInfo(msg.Message)
+	mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength := extractMediaInfo(msg.Message, msg.Info.Timestamp, msg.Info.ID)
 
 	// Skip if there's no content and no media
 	if content == "" && mediaType == "" {
@@ -1099,11 +1125,11 @@ func onReady() {
 	mStatus = systray.AddMenuItem("Status: iniciando...", "Estado da conexao com o WhatsApp")
 	mStatus.Disable()
 	systray.AddSeparator()
-	mConnect := systray.AddMenuItem("Conectar / Reconectar", "Detecta o estado e conecta; gera QR se estiver deslogado")
-	mLog := systray.AddMenuItem("Ver log", "Abrir o log do bridge")
-	mFolder := systray.AddMenuItem("Abrir pasta", "Abrir a pasta do bridge")
+	mConnect := systray.AddMenuItem("Connect / Reconnect", "Detects the current state and connects, showing a QR when logged out")
+	mLog := systray.AddMenuItem("View log", "Open the bridge log")
+	mFolder := systray.AddMenuItem("Open folder", "Open the bridge folder")
 	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Sair (para o bridge)", "Encerra o bridge")
+	mQuit := systray.AddMenuItem("Quit (stops the bridge)", "Encerra o bridge")
 
 	go runBridge() // connect in the background; the tray shows up immediately
 
@@ -1180,14 +1206,14 @@ func refreshStatus() {
 	c := globalClient
 	switch {
 	case c != nil && c.Store.ID != nil && c.IsConnected():
-		mStatus.SetTitle("Status: CONECTADO (" + c.Store.ID.User + ")")
-		systray.SetTooltip("WhatsApp Bridge - conectado")
+		mStatus.SetTitle("Status: CONNECTED (" + c.Store.ID.User + ")")
+		systray.SetTooltip("WhatsApp Bridge - connected")
 	case c != nil && c.Store.ID != nil:
-		mStatus.SetTitle("Status: desconectado - clique Conectar")
-		systray.SetTooltip("WhatsApp Bridge - desconectado (sessao valida)")
+		mStatus.SetTitle("Status: disconnected, click Connect")
+		systray.SetTooltip("WhatsApp Bridge - disconnected (session still valid)")
 	default:
-		mStatus.SetTitle("Status: DESLOGADO - clique Conectar (QR)")
-		systray.SetTooltip("WhatsApp Bridge - deslogado, precisa escanear QR")
+		mStatus.SetTitle("Status: LOGGED OUT, click Connect to pair")
+		systray.SetTooltip("WhatsApp Bridge - logged out, scan the QR to pair")
 	}
 }
 
@@ -1204,23 +1230,23 @@ func statusLoop() {
 func doQRPair(client *whatsmeow.Client) {
 	qrChan, err := client.GetQRChannel(context.Background())
 	if err != nil {
-		fmt.Printf("Erro ao obter canal de QR: %v\n", err)
+		fmt.Printf("Failed to open the QR channel: %v\n", err)
 		return
 	}
 	if err := client.Connect(); err != nil {
-		fmt.Printf("Erro ao conectar para QR: %v\n", err)
+		fmt.Printf("Failed to connect for QR pairing: %v\n", err)
 		return
 	}
 	opened := false // open the viewer only for the first code (the QR rotates every ~30s)
 	for evt := range qrChan {
 		switch evt.Event {
 		case "code":
-			fmt.Println("\nEscaneie este QR no WhatsApp > Aparelhos conectados:")
+			fmt.Println("\nScan this QR in WhatsApp > Linked devices:")
 			qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
 			if code, qerr := qr.Encode(evt.Code, qr.M); qerr == nil {
 				if werr := os.WriteFile("qr.png", code.PNG(), 0644); werr == nil {
 					if !opened {
-						fmt.Println(">>> QR salvo em qr.png - abrindo no visualizador <<<")
+						fmt.Println(">>> QR starget em qr.png - abrindo no visualizador <<<")
 						openPath("qr.png")
 						opened = true
 					}
@@ -1232,10 +1258,10 @@ func doQRPair(client *whatsmeow.Client) {
 			refreshStatus()
 			return
 		case "timeout":
-			fmt.Println("QR expirou. Clique em Conectar de novo para gerar outro.")
+			fmt.Println("QR expired. Click Connect again to generate a new one.")
 			return
 		case "error":
-			fmt.Printf("Erro no fluxo de QR: %v\n", evt.Error)
+			fmt.Printf("QR pairing failed: %v\n", evt.Error)
 			return
 		}
 	}
@@ -1256,7 +1282,7 @@ func triggerConnect() {
 	// already connected and logged in
 	if c.Store.ID != nil && c.IsConnected() {
 		connectMu.Unlock()
-		fmt.Println("WhatsApp ja esta conectado.")
+		fmt.Println("WhatsApp is already connected.")
 		refreshStatus()
 		return
 	}
@@ -1264,18 +1290,18 @@ func triggerConnect() {
 	// valid session, just reconnect
 	if c.Store.ID != nil {
 		connectMu.Unlock()
-		fmt.Println("Sessao valida, reconectando...")
+		fmt.Println("Session still valid, reconnecting...")
 		c.Disconnect()
 		time.Sleep(300 * time.Millisecond)
 		if err := c.Connect(); err != nil {
-			fmt.Printf("Falha ao reconectar: %v\n", err)
+			fmt.Printf("Reconnect failed: %v\n", err)
 		}
 		time.Sleep(2 * time.Second)
 		refreshStatus()
 		return
 	}
 
-	// deslogado: precisa de QR
+	// logged out: needs QR pairing
 	if qrActive {
 		connectMu.Unlock()
 		fmt.Println("Pareamento ja em andamento (veja qr.png).")
@@ -1356,7 +1382,7 @@ func runBridge() {
 	// Close is handled by onExit (systray); runBridge returns early, so no defer here
 
 	// Asynchronous processing: o handler do whatsmeow so enfileira (rapido) e um
-	// worker processa em ordem. Evita travar o dispatcher quando chega um history
+	// worker drains it in order. This keeps the dispatcher from stalling when a large history
 	// sync grande (antes dava "node handling taking long" de minutos, atrasando as
 	// mensagens reais). 1 worker = sem concorrencia de escrita no SQLite.
 	eventQueue := make(chan interface{}, 4096)
@@ -1377,7 +1403,7 @@ func runBridge() {
 			select {
 			case eventQueue <- evt:
 			default:
-				logger.Warnf("Fila de eventos cheia, descartando evento")
+				logger.Warnf("Event queue full, dropping event")
 			}
 		case *events.LabelEdit:
 			messageStore.StoreLabel(v.LabelID, v.Action.GetName(), int(v.Action.GetColor()), v.Action.GetDeleted())
@@ -1385,11 +1411,11 @@ func runBridge() {
 			messageStore.StoreLabelChat(v.LabelID, v.JID.String(), v.Action.GetLabeled())
 		case *events.Connected:
 			logger.Infof("Connected to WhatsApp")
-			fmt.Println(time.Now().Format("2006-01-02 15:04:05"), "[bridge] CONECTADO")
+			fmt.Println(time.Now().Format("2006-01-02 15:04:05"), "[bridge] CONNECTED")
 			refreshStatus()
 		case *events.LoggedOut:
 			logger.Warnf("Device logged out, please scan QR code to log in again")
-			fmt.Println(time.Now().Format("2006-01-02 15:04:05"), "[bridge] DESLOGADO - precisa reconectar (QR)")
+			fmt.Println(time.Now().Format("2006-01-02 15:04:05"), "[bridge] LOGGED OUT, scan the QR to reconnect")
 			refreshStatus()
 		}
 	})
@@ -1559,7 +1585,8 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 				var fileLength uint64
 
 				if msg.Message.Message != nil {
-					mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength = extractMediaInfo(msg.Message.Message)
+					mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength = extractMediaInfo(
+						msg.Message.Message, time.Unix(int64(msg.Message.GetMessageTimestamp()), 0), msg.Message.Key.GetID())
 				}
 
 				// Log the message content for debugging
