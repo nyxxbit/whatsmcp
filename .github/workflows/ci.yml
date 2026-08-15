@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  bridge:
+    # The bridge opens the pairing QR through Windows shell handlers, so the
+    # tests run on the platform it actually targets.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: build
+        working-directory: whatsapp-bridge
+        run: go build ./...
+      - name: vet
+        working-directory: whatsapp-bridge
+        run: go vet ./...
+      - name: test
+        working-directory: whatsapp-bridge
+        run: go test ./...
+
+  wabridge:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: build
+        working-directory: wabridge
+        run: go build ./...
+      - name: test
+        working-directory: wabridge
+        run: go test ./...

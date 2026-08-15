@@ -1,0 +1,5 @@
+# Normalise line endings so gofmt diffs stay clean across platforms
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ico binary
+*.png binary

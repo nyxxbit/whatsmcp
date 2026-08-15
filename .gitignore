@@ -34,7 +34,7 @@ whisper-tool/cache/
 *.ogg
 *.opus
 
-# Local operator scripts and notes: machine-specific, carry real contact data
+# Operator-specific runbooks and scripts, not part of the public project
 cobranca/
 whisper-tool/_antigos/
 whisper-tool/*.txt
