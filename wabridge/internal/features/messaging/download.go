@@ -11,9 +11,10 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/ports"
 )
 
-// Downloader é o caso de uso de download de mídia: resolve os metadados no
-// repositório, usa cache em disco e só baixa (via MediaFetcher) quando preciso.
-// Compõe um Repository (persistência) com um Fetcher (rede): Single Responsibility.
+// Downloader is the media download use case: it resolves metadata from the
+// repository, uses an on-disk cache, and only downloads (via MediaFetcher)
+// when needed. Composes a Repository (persistence) with a Fetcher (network):
+// Single Responsibility.
 type Downloader struct {
 	repo    ports.MessageRepository
 	fetcher ports.MediaFetcher
@@ -23,10 +24,10 @@ type Downloader struct {
 
 var _ ports.MediaDownloader = (*Downloader)(nil)
 
-// NewDownloader cria o caso de uso (fail-fast nas dependências).
+// NewDownloader creates the use case (fail-fast on dependencies).
 func NewDownloader(repo ports.MessageRepository, fetcher ports.MediaFetcher, baseDir string, log ports.Logger) *Downloader {
 	if repo == nil || fetcher == nil || log == nil {
-		panic("messaging: Downloader exige repo, fetcher e log")
+		panic("messaging: Downloader requires repo, fetcher, and log")
 	}
 	if baseDir == "" {
 		baseDir = "store"
@@ -34,39 +35,40 @@ func NewDownloader(repo ports.MessageRepository, fetcher ports.MediaFetcher, bas
 	return &Downloader{repo: repo, fetcher: fetcher, baseDir: baseDir, log: log}
 }
 
-// Download garante a mídia em disco e devolve o resultado. Programação positiva:
-// erros explícitos (mídia inexistente, metadados incompletos, falha de rede/IO).
+// Download ensures the media is on disk and returns the result. Positive
+// programming: explicit errors (missing media, incomplete metadata,
+// network/IO failure).
 func (d *Downloader) Download(ctx context.Context, messageID, chatJID string) (domain.DownloadResult, error) {
 	media, err := d.repo.FindMedia(ctx, messageID, chatJID)
 	if err != nil {
-		return domain.DownloadResult{}, err // inclui domain.ErrMediaNotFound
+		return domain.DownloadResult{}, err // includes domain.ErrMediaNotFound
 	}
 
 	chatDir := filepath.Join(d.baseDir, strings.ReplaceAll(chatJID, ":", "_"))
 	localPath := filepath.Join(chatDir, media.Filename())
 	absPath, err := filepath.Abs(localPath)
 	if err != nil {
-		return domain.DownloadResult{}, fmt.Errorf("messaging: caminho absoluto: %w", err)
+		return domain.DownloadResult{}, fmt.Errorf("messaging: absolute path: %w", err)
 	}
 
-	// Cache hit: já baixado antes.
+	// Cache hit: already downloaded before.
 	if _, err := os.Stat(localPath); err == nil {
 		return domain.NewDownloadResult(media.Kind(), media.Filename(), absPath), nil
 	}
 
 	if !media.IsDownloadable() {
-		return domain.DownloadResult{}, fmt.Errorf("messaging: metadados de mídia incompletos para download")
+		return domain.DownloadResult{}, fmt.Errorf("messaging: incomplete media metadata for download")
 	}
 	if err := os.MkdirAll(chatDir, 0o755); err != nil {
-		return domain.DownloadResult{}, fmt.Errorf("messaging: criar pasta da conversa: %w", err)
+		return domain.DownloadResult{}, fmt.Errorf("messaging: create chat folder: %w", err)
 	}
 	data, err := d.fetcher.Fetch(ctx, media)
 	if err != nil {
 		return domain.DownloadResult{}, err
 	}
 	if err := os.WriteFile(localPath, data, 0o644); err != nil {
-		return domain.DownloadResult{}, fmt.Errorf("messaging: salvar mídia: %w", err)
+		return domain.DownloadResult{}, fmt.Errorf("messaging: save media: %w", err)
 	}
-	d.log.Info("mídia baixada", "tipo", media.Kind(), "arquivo", absPath, "bytes", len(data))
+	d.log.Info("media downloaded", "type", media.Kind(), "file", absPath, "bytes", len(data))
 	return domain.NewDownloadResult(media.Kind(), media.Filename(), absPath), nil
 }

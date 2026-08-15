@@ -55,37 +55,37 @@ func wire(t *testing.T) (ports.EventBus, *fakeMessageRepo, *fakeChatRepo) {
 func TestMessaging_persisteMensagemAoVivo(t *testing.T) {
 	bus, msgs, chats := wire(t)
 	jid := domain.MustJID("100000000000003@lid")
-	msg, _ := domain.NewMessage("ABC", jid, jid, "trabalhei dia 17", time.Now(), false, nil)
+	msg, _ := domain.NewMessage("ABC", jid, jid, "hello there", time.Now(), false, nil)
 	chat, _ := domain.NewChat(jid, "Alex Carter", time.Now())
 	evt, _ := domain.NewMessageReceived(msg, chat)
 
 	bus.Publish(context.Background(), evt)
 
-	if len(msgs.saved) != 1 || msgs.saved[0].Content() != "trabalhei dia 17" {
-		t.Fatalf("mensagem não persistida: %+v", msgs.saved)
+	if len(msgs.saved) != 1 || msgs.saved[0].Content() != "hello there" {
+		t.Fatalf("message not persisted: %+v", msgs.saved)
 	}
 	if len(chats.upserts) != 1 || chats.upserts[0].Name() != "Alex Carter" {
-		t.Fatalf("conversa não persistida: %+v", chats.upserts)
+		t.Fatalf("chat not persisted: %+v", chats.upserts)
 	}
 }
 
 func TestMessaging_persisteHistoricoEmLote(t *testing.T) {
 	bus, msgs, _ := wire(t)
 	jid := domain.MustJID("5511999990003@s.whatsapp.net")
-	m1, _ := domain.NewMessage("1", jid, jid, "oi", time.Now(), false, nil)
-	m2, _ := domain.NewMessage("2", jid, jid, "tudo bem", time.Now(), true, nil)
+	m1, _ := domain.NewMessage("1", jid, jid, "hi", time.Now(), false, nil)
+	m2, _ := domain.NewMessage("2", jid, jid, "all good", time.Now(), true, nil)
 	evt := domain.NewHistorySynced(nil, []domain.Message{m1, m2}, time.Now())
 
 	bus.Publish(context.Background(), evt)
 
 	if len(msgs.batch) != 1 || len(msgs.batch[0]) != 2 {
-		t.Fatalf("lote de histórico não persistido: %+v", msgs.batch)
+		t.Fatalf("history batch not persisted: %+v", msgs.batch)
 	}
 }
 
 func TestMessaging_failFastSemRepositorios(t *testing.T) {
 	err := messaging.New().Register(ports.FeatureDeps{Log: logging.Noop{}, Bus: eventbus.New(logging.Noop{})})
 	if err == nil {
-		t.Fatal("esperava erro fail-fast sem Messages/Chats")
+		t.Fatal("expected fail-fast error without Messages/Chats")
 	}
 }

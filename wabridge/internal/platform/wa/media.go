@@ -10,8 +10,8 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/domain"
 )
 
-// mediaStrategy mapeia a extensão do arquivo no tipo de mídia do whatsmeow e no
-// mimetype correto (para o WhatsApp pré-visualizar). Idêntico ao switch do legado.
+// mediaStrategy maps the file extension to whatsmeow's media type and the
+// correct mimetype (so WhatsApp can preview it). Identical to the legacy switch.
 func mediaStrategy(ext string) (whatsmeow.MediaType, string) {
 	switch strings.ToLower(ext) {
 	case "jpg", "jpeg":
@@ -45,8 +45,9 @@ func mediaStrategy(ext string) (whatsmeow.MediaType, string) {
 	}
 }
 
-// extractMedia traduz a mídia de uma mensagem do protocolo em domain.Media
-// (nil quando não há mídia). Já inclui o direct_path do proto (download confiável).
+// extractMedia translates the media of a protocol message into domain.Media
+// (nil when there is no media). Already includes the direct_path from the
+// proto (reliable download).
 func extractMedia(msg *waProto.Message) *domain.Media {
 	if msg == nil {
 		return nil
@@ -88,7 +89,7 @@ func buildMedia(kind domain.MediaKind, filename, url, directPath string, key, sh
 	return &media
 }
 
-// mediaKindToWA converte o tipo de domínio no enum do whatsmeow (para download).
+// mediaKindToWA converts the domain type into whatsmeow's enum (for download).
 func mediaKindToWA(kind domain.MediaKind) (whatsmeow.MediaType, bool) {
 	switch kind {
 	case domain.MediaImage:
@@ -104,7 +105,7 @@ func mediaKindToWA(kind domain.MediaKind) (whatsmeow.MediaType, bool) {
 	}
 }
 
-// downloadable implementa whatsmeow.DownloadableMessage a partir de domain.Media.
+// downloadable implements whatsmeow.DownloadableMessage from a domain.Media.
 type downloadable struct {
 	url, directPath          string
 	mediaKey, sha256, encSHA []byte

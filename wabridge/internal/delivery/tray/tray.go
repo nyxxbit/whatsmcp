@@ -1,6 +1,7 @@
-// Package tray é a entrega via bandeja do sistema (systray nativo, sem janela de
-// console). Mostra o status ao vivo, conecta/reconecta sob demanda, abre o QR
-// quando publicado no bus e abre o log no navegador (fim do Notepad).
+// Package tray is the system tray delivery (native systray, no console
+// window). It shows live status, connects/reconnects on demand, opens the QR
+// code when published on the bus, and opens the log in the browser (no more
+// Notepad).
 package tray
 
 import (
@@ -18,7 +19,7 @@ import (
 //go:embed icon.ico
 var iconData []byte
 
-// Tray controla o ícone da bandeja. Depende apenas de ports (SessionManager, Bus).
+// Tray controls the tray icon. Depends only on ports (SessionManager, Bus).
 type Tray struct {
 	session  ports.SessionManager
 	bus      ports.EventBus
@@ -29,11 +30,11 @@ type Tray struct {
 	statusItem *systray.MenuItem
 }
 
-// New cria a tray e já assina QRCodeReady no bus (antes do Connect, para nunca
-// perder o evento). Fail-fast nas dependências.
+// New creates the tray and immediately subscribes to QRCodeReady on the bus
+// (before Connect, so the event is never missed). Fail-fast on dependencies.
 func New(session ports.SessionManager, bus ports.EventBus, log ports.Logger, logsURL string, shutdown func()) *Tray {
 	if session == nil || bus == nil || log == nil {
-		panic("tray: session, bus e log são obrigatórios")
+		panic("tray: session, bus, and log are required")
 	}
 	if shutdown == nil {
 		shutdown = func() {}
@@ -41,7 +42,7 @@ func New(session ports.SessionManager, bus ports.EventBus, log ports.Logger, log
 	t := &Tray{session: session, bus: bus, log: log, logsURL: logsURL, shutdown: shutdown}
 	bus.Subscribe(domain.EventQRCodeReady, func(_ context.Context, evt domain.Event) error {
 		if qr, ok := evt.(domain.QRCodeReady); ok {
-			t.log.Info("abrindo QR no visualizador", "arquivo", qr.Path())
+			t.log.Info("opening QR code in viewer", "file", qr.Path())
 			openExternal(qr.Path())
 		}
 		return nil
@@ -49,8 +50,8 @@ func New(session ports.SessionManager, bus ports.EventBus, log ports.Logger, log
 	return t
 }
 
-// Run sobe a bandeja (BLOQUEIA a thread principal até "Sair"). systray exige a
-// main thread, por isso é o último passo do composition root.
+// Run starts the tray (BLOCKS the main thread until "Quit"). systray requires
+// the main thread, which is why this is the last step of the composition root.
 func (t *Tray) Run() { systray.Run(t.onReady, t.onExit) }
 
 func (t *Tray) onReady() {
@@ -60,14 +61,14 @@ func (t *Tray) onReady() {
 
 	title := systray.AddMenuItem("WhatsApp Bridge", "")
 	title.Disable()
-	t.statusItem = systray.AddMenuItem("Status: iniciando...", "Estado da conexão com o WhatsApp")
+	t.statusItem = systray.AddMenuItem("Status: starting...", "WhatsApp connection state")
 	t.statusItem.Disable()
 	systray.AddSeparator()
-	mConnect := systray.AddMenuItem("Conectar / Reconectar", "Detecta o estado e conecta; gera QR se deslogado")
-	mLog := systray.AddMenuItem("Ver log (navegador)", "Abre o final do log no navegador")
-	mFolder := systray.AddMenuItem("Abrir pasta", "Abre a pasta do bridge")
+	mConnect := systray.AddMenuItem("Connect / Reconnect", "Detects the state and connects; generates a QR code if logged out")
+	mLog := systray.AddMenuItem("View log (browser)", "Opens the end of the log in the browser")
+	mFolder := systray.AddMenuItem("Open folder", "Opens the bridge folder")
 	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Sair (para o bridge)", "Encerra o bridge")
+	mQuit := systray.AddMenuItem("Quit (stops the bridge)", "Stops the bridge")
 
 	go t.statusLoop()
 
@@ -90,7 +91,7 @@ func (t *Tray) onReady() {
 
 func (t *Tray) onExit() { t.shutdown() }
 
-// statusLoop reavalia o estado a cada 5s (detecta queda/volta sozinho).
+// statusLoop re-evaluates the state every 5s (detects disconnects/reconnects on its own).
 func (t *Tray) statusLoop() {
 	for {
 		t.refreshStatus()
@@ -105,17 +106,18 @@ func (t *Tray) refreshStatus() {
 	st := t.session.Status()
 	switch st.State() {
 	case domain.SessionConnectedState:
-		t.statusItem.SetTitle("Status: CONECTADO (" + st.Account() + ")")
-		systray.SetTooltip("WhatsApp Bridge - conectado")
+		t.statusItem.SetTitle("Status: CONNECTED (" + st.Account() + ")")
+		systray.SetTooltip("WhatsApp Bridge - connected")
 	case domain.SessionOfflineState:
-		t.statusItem.SetTitle("Status: reconectando...")
-		systray.SetTooltip("WhatsApp Bridge - reconectando")
-		// Auto-cura: sessão válida porém caída → dispara reconexão (idempotente;
-		// o adapter ignora se já houver um laço em andamento). Recupera sozinho
-		// quando a internet volta, sem precisar do botão ou de reiniciar o exe.
+		t.statusItem.SetTitle("Status: reconnecting...")
+		systray.SetTooltip("WhatsApp Bridge - reconnecting")
+		// Self-healing: a valid session that's down triggers a reconnect
+		// (idempotent; the adapter ignores it if a loop is already running). It
+		// recovers on its own once the internet comes back, with no need for
+		// the button or restarting the exe.
 		go t.session.Connect()
 	default:
-		t.statusItem.SetTitle("Status: DESLOGADO - clique Conectar (QR)")
-		systray.SetTooltip("WhatsApp Bridge - deslogado, escaneie o QR")
+		t.statusItem.SetTitle("Status: LOGGED OUT - click Connect (QR)")
+		systray.SetTooltip("WhatsApp Bridge - logged out, scan the QR code")
 	}
 }

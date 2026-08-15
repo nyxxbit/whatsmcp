@@ -10,45 +10,46 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/domain"
 )
 
-// pairWithQR roda o pareamento por QR: salva o PNG e publica QRCodeReady (a tray
-// abre a imagem; o domínio não conhece UI). Bloqueia até sucesso/timeout/erro.
+// pairWithQR runs QR pairing: saves the PNG and publishes QRCodeReady (the
+// tray opens the image; the domain layer knows nothing about UI). Blocks
+// until success/timeout/error.
 func (c *Client) pairWithQR() {
 	qrChan, err := c.wm.GetQRChannel(context.Background())
 	if err != nil {
-		c.log.Error("obter canal de QR", "err", err)
+		c.log.Error("get QR channel", "err", err)
 		return
 	}
 	if err := c.wm.Connect(); err != nil {
-		c.log.Error("conectar para QR", "err", err)
+		c.log.Error("connect for QR", "err", err)
 		return
 	}
-	published := false // publica QRCodeReady só no primeiro code (o QR rotaciona ~30s)
+	published := false // publishes QRCodeReady only on the first code (the QR rotates ~30s)
 	for evt := range qrChan {
 		switch evt.Event {
 		case "code":
 			code, qerr := qr.Encode(evt.Code, qr.M)
 			if qerr != nil {
-				c.log.Error("codificar QR", "err", qerr)
+				c.log.Error("encode QR", "err", qerr)
 				continue
 			}
 			if werr := os.WriteFile(c.qrPath, code.PNG(), 0o644); werr != nil {
-				c.log.Error("salvar QR", "err", werr)
+				c.log.Error("save QR", "err", werr)
 				continue
 			}
 			if !published {
 				c.publish(domain.NewQRCodeReady(c.qrPath, time.Now()))
 				published = true
-				c.log.Info("QR gerado, escaneie no WhatsApp > Aparelhos conectados", "arquivo", c.qrPath)
+				c.log.Info("QR generated, scan it in WhatsApp > Linked devices", "file", c.qrPath)
 			}
 		case "success":
-			c.log.Info("QR pareado com sucesso")
+			c.log.Info("QR paired successfully")
 			_ = os.Remove(c.qrPath)
 			return
 		case "timeout":
-			c.log.Warn("QR expirou, clique em Conectar para gerar outro")
+			c.log.Warn("QR expired, click Connect to generate another one")
 			return
 		case "error":
-			c.log.Error("erro no fluxo de QR", "err", evt.Error)
+			c.log.Error("error in QR flow", "err", evt.Error)
 			return
 		}
 	}

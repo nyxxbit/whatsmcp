@@ -8,8 +8,8 @@ import (
 	"github.com/nyxxbit/wabridge/internal/features/contacts"
 )
 
-// fakeRepo é um stub em memória de ContactRepository, testa o use case sem tocar
-// em SQLite ou whatsmeow (a abstração por Port permite isso).
+// fakeRepo is an in-memory stub of ContactRepository; it tests the use case
+// without touching SQLite or whatsmeow (the Port abstraction allows this).
 type fakeRepo struct {
 	byJID map[string]domain.Identity
 }
@@ -18,7 +18,7 @@ func (f fakeRepo) Identify(_ context.Context, jid domain.JID) (domain.Identity, 
 	if id, ok := f.byJID[jid.String()]; ok {
 		return id, nil
 	}
-	// Best-effort: sem nome/telefone conhecidos, devolve só o JID (não é erro).
+	// Best-effort: with no known name/phone, returns just the JID (not an error).
 	return domain.NewIdentity(jid, "", "")
 }
 
@@ -38,7 +38,7 @@ func TestResolver_identifyTrazNomeENumero(t *testing.T) {
 		t.Fatalf("Phone = %q", id.Phone())
 	}
 	if id.Display() != "Alex Carter - Springfield (5511999990003)" {
-		t.Fatalf("Display = %q (esperava nome + número juntos)", id.Display())
+		t.Fatalf("Display = %q (expected name + number together)", id.Display())
 	}
 }
 
@@ -48,12 +48,12 @@ func TestResolver_desconhecidoPreservaJID(t *testing.T) {
 
 	id := resolver.Identify(context.Background(), jid)
 	if id.HasName() {
-		t.Fatalf("não deveria ter nome, veio %q", id.Name())
+		t.Fatalf("should not have a name, got %q", id.Name())
 	}
 	if id.JID() != jid {
-		t.Fatalf("JID cru deveria ser preservado")
+		t.Fatalf("raw JID should be preserved")
 	}
-	if id.Display() != "100000000000003" { // fallback para o user do JID
+	if id.Display() != "100000000000003" { // fallback to the JID's user portion
 		t.Fatalf("Display = %q", id.Display())
 	}
 }

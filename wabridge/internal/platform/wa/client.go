@@ -1,7 +1,8 @@
-// Package wa adapta a biblioteca whatsmeow ao núcleo: traduz os eventos da lib em
-// eventos de domínio (publicados no bus) e implementa as portas de saída
-// (MessageSender, MediaFetcher, SessionManager, LabelSyncer). É o ÚNICO pacote
-// que conhece os tipos do whatsmeow, features e entrega só enxergam ports.
+// Package wa adapts the whatsmeow library to the core: it translates the
+// library's events into domain events (published on the bus) and implements
+// the outbound ports (MessageSender, MediaFetcher, SessionManager,
+// LabelSyncer). It is the ONLY package that knows whatsmeow's types; features
+// and delivery only ever see ports.
 package wa
 
 import (
@@ -17,7 +18,7 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/ports"
 )
 
-// Garantias em tempo de compilação de que o adapter satisfaz as portas de saída.
+// Compile-time guarantees that the adapter satisfies the outbound ports.
 var (
 	_ ports.MessageSender  = (*Client)(nil)
 	_ ports.MediaFetcher   = (*Client)(nil)
@@ -25,18 +26,18 @@ var (
 	_ ports.LabelSyncer    = (*Client)(nil)
 )
 
-const eventQueueSize = 4096 // capacidade da fila de eventos (history sync grande)
+const eventQueueSize = 4096 // event queue capacity (large history sync)
 
-// Config reúne as dependências do adapter (injetadas no composition root).
+// Config gathers the adapter's dependencies (injected at the composition root).
 type Config struct {
-	WhatsappDBPath string         // store de sessão do whatsmeow (ex: "store/whatsapp.db")
-	QRPath         string         // caminho do PNG de QR (ex: "qr.png")
-	Bus            ports.EventBus // para publicar eventos de domínio
+	WhatsappDBPath string         // whatsmeow's session store (e.g. "store/whatsapp.db")
+	QRPath         string         // path to the QR PNG (e.g. "qr.png")
+	Bus            ports.EventBus // for publishing domain events
 	Log            ports.Logger
-	ChatNames      ports.ChatRepository // lookup do nome já salvo (resolução de conversa)
+	ChatNames      ports.ChatRepository // lookup for an already-saved name (chat resolution)
 }
 
-// Client é o adapter do whatsmeow.
+// Client is the whatsmeow adapter.
 type Client struct {
 	wm        *whatsmeow.Client
 	bus       ports.EventBus
@@ -51,11 +52,12 @@ type Client struct {
 	reconnecting bool
 }
 
-// New constrói o adapter: abre o store de sessão, cria o client whatsmeow, sobe o
-// worker da fila e registra o handler de eventos. Fail-fast nas dependências.
+// New builds the adapter: opens the session store, creates the whatsmeow
+// client, starts the queue worker, and registers the event handler. Fail-fast
+// on missing dependencies.
 func New(cfg Config) (*Client, error) {
 	if cfg.Bus == nil || cfg.Log == nil || cfg.ChatNames == nil {
-		return nil, fmt.Errorf("wa: Bus, Log e ChatNames são obrigatórios")
+		return nil, fmt.Errorf("wa: Bus, Log, and ChatNames are required")
 	}
 	if cfg.WhatsappDBPath == "" {
 		cfg.WhatsappDBPath = "store/whatsapp.db"
@@ -68,20 +70,20 @@ func New(cfg Config) (*Client, error) {
 	dsn := "file:" + cfg.WhatsappDBPath + "?_foreign_keys=on"
 	container, err := sqlstore.New(ctx, "sqlite3", dsn, newWALog(cfg.Log, "Database"))
 	if err != nil {
-		return nil, fmt.Errorf("wa: abrir store de sessão: %w", err)
+		return nil, fmt.Errorf("wa: open session store: %w", err)
 	}
 	device, err := container.GetFirstDevice(ctx)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			device = container.NewDevice()
-			cfg.Log.Info("wa: novo device criado (sem sessão, precisará de QR)")
+			cfg.Log.Info("wa: new device created (no session, will need QR)")
 		} else {
-			return nil, fmt.Errorf("wa: obter device: %w", err)
+			return nil, fmt.Errorf("wa: get device: %w", err)
 		}
 	}
 	wm := whatsmeow.NewClient(device, newWALog(cfg.Log, "Client"))
 	if wm == nil {
-		return nil, fmt.Errorf("wa: falha ao criar client whatsmeow")
+		return nil, fmt.Errorf("wa: failed to create whatsmeow client")
 	}
 
 	c := &Client{

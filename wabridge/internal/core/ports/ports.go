@@ -1,9 +1,9 @@
-// Package ports declara os contratos (interfaces) do núcleo. É a fronteira da
-// arquitetura hexagonal: o domínio e as features dependem destas abstrações,
-// nunca de implementações concretas (Dependency Inversion Principle).
+// Package ports declares the core's contracts (interfaces). It is the boundary of the
+// hexagonal architecture: the domain and features depend on these abstractions,
+// never on concrete implementations (Dependency Inversion Principle).
 //
-// Interfaces são pequenas e focadas (Interface Segregation) e ficam juntas aqui
-// por serem o "kit de munição" compartilhado. Cada feature/adapter usa só o que precisa.
+// Interfaces are small and focused (Interface Segregation) and live together here
+// since they are the shared "ammo kit". Each feature/adapter uses only what it needs.
 package ports
 
 import (
@@ -12,10 +12,10 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/domain"
 )
 
-// ── Infra transversal ──────────────────────────────────────────────────────
+// ── Cross-cutting infra ──────────────────────────────────────────────────────
 
-// Logger é o contrato de log estruturado. Implementações: slog (produção),
-// no-op (testes/silêncio). Substituível sem tocar em quem loga.
+// Logger is the structured logging contract. Implementations: slog (production),
+// no-op (tests/silence). Swappable without touching whoever logs.
 type Logger interface {
 	Info(msg string, args ...any)
 	Warn(msg string, args ...any)
@@ -23,88 +23,88 @@ type Logger interface {
 	With(args ...any) Logger
 }
 
-// ── Repositórios (persistência abstraída, padrão Repository) ───────────────
+// ── Repositories (abstracted persistence, Repository pattern) ───────────────
 
-// ContactRepository resolve a identidade COMPLETA de um JID (nome + número + JID
-// cru), cruzando lid_map e contacts. "Visão ampla": devolve tudo o que conseguir;
-// campos desconhecidos vêm vazios. Erro só em falha de infraestrutura - "sem nome"
-// NÃO é erro (programação positiva: a ausência de nome é um dado, não uma exceção).
+// ContactRepository resolves the FULL identity of a JID (name + number + raw
+// JID), cross-referencing lid_map and contacts. "Wide view": it returns everything it
+// can; unknown fields come back empty. Error only on infrastructure failure. "No name"
+// is NOT an error (positive programming: the absence of a name is data, not an exception).
 type ContactRepository interface {
 	Identify(ctx context.Context, jid domain.JID) (domain.Identity, error)
 }
 
-// MessageRepository persiste mensagens e recupera metadados de mídia.
+// MessageRepository persists messages and retrieves media metadata.
 type MessageRepository interface {
 	Save(ctx context.Context, msg domain.Message) error
 	SaveBatch(ctx context.Context, msgs []domain.Message) error
-	// FindMedia recupera os metadados de mídia de uma mensagem (para download).
-	// Devolve domain.ErrMediaNotFound quando a mensagem não tem mídia.
+	// FindMedia retrieves a message's media metadata (for download).
+	// Returns domain.ErrMediaNotFound when the message has no media.
 	FindMedia(ctx context.Context, messageID, chatJID string) (domain.Media, error)
 }
 
-// ChatRepository persiste conversas e consulta nomes já conhecidos.
+// ChatRepository persists chats and looks up already-known names.
 type ChatRepository interface {
 	Upsert(ctx context.Context, chat domain.Chat) error
-	// FindName devolve o nome salvo da conversa; erro se ainda não houver nome.
+	// FindName returns the chat's saved name; error if there is no name yet.
 	FindName(ctx context.Context, jid domain.JID) (string, error)
 }
 
-// LabelRepository persiste etiquetas e suas associações com conversas.
+// LabelRepository persists labels and their associations with chats.
 type LabelRepository interface {
 	SaveLabel(ctx context.Context, label domain.Label) error
 	SaveAssociation(ctx context.Context, assoc domain.LabelAssociation) error
 }
 
-// ── Saída para o WhatsApp (adapters da lib) ─────────────────────────────────
+// ── Output to WhatsApp (lib adapters) ─────────────────────────────────
 
-// MessageSender é a porta de envio de mensagens (texto e mídia).
+// MessageSender is the port for sending messages (text and media).
 type MessageSender interface {
 	SendText(ctx context.Context, to domain.JID, body string) error
-	// SendMedia envia o arquivo em mediaPath com legenda opcional; o tipo é
-	// inferido pela extensão (Strategy no adapter).
+	// SendMedia sends the file at mediaPath with an optional caption; the type is
+	// inferred from the extension (Strategy in the adapter).
 	SendMedia(ctx context.Context, to domain.JID, mediaPath, caption string) error
 }
 
-// MediaFetcher baixa e descriptografa os bytes de uma mídia a partir dos seus
-// metadados (camada baixa: só fala com os servidores do WhatsApp).
+// MediaFetcher downloads and decrypts a media's bytes from its
+// metadata (low-level layer: only talks to WhatsApp's servers).
 type MediaFetcher interface {
 	Fetch(ctx context.Context, media domain.Media) ([]byte, error)
 }
 
-// MediaDownloader é o caso de uso de alto nível: resolve os metadados, usa o
-// cache em disco, baixa se preciso e devolve o resultado já salvo.
+// MediaDownloader is the high-level use case: it resolves the metadata, uses the
+// disk cache, downloads if needed and returns the already-saved result.
 type MediaDownloader interface {
 	Download(ctx context.Context, messageID, chatJID string) (domain.DownloadResult, error)
 }
 
-// SessionManager controla o ciclo de vida da conexão (Connect unifica
-// reconectar e parear via QR, como o botão "Conectar" do bridge legado).
+// SessionManager controls the connection lifecycle (Connect unifies
+// reconnecting and pairing via QR, like the "Connect" button in the legacy bridge).
 type SessionManager interface {
 	Connect()
 	Disconnect()
 	Status() domain.SessionStatus
 }
 
-// LabelSyncer dispara a sincronização de etiquetas (fullSync do app state).
+// LabelSyncer triggers label synchronization (fullSync of the app state).
 type LabelSyncer interface {
 	SyncLabels(ctx context.Context) error
 }
 
-// ── Eventos & Features (Observer + Open-Closed) ─────────────────────────────
+// ── Events & Features (Observer + Open-Closed) ─────────────────────────────
 
-// EventHandler reage a um evento de domínio.
+// EventHandler reacts to a domain event.
 type EventHandler func(ctx context.Context, evt domain.Event) error
 
-// EventBus é o canal de eventos do núcleo (padrão Observer/Mediator). Features
-// publicam e assinam fatos sem conhecer umas às outras.
+// EventBus is the core's event channel (Observer/Mediator pattern). Features
+// publish and subscribe to facts without knowing about each other.
 type EventBus interface {
 	Subscribe(eventName string, handler EventHandler)
 	Publish(ctx context.Context, evt domain.Event)
 }
 
-// FeatureDeps é o kit de dependências ("munição") entregue a cada feature no
-// registro, apenas ports. Nenhuma feature enxerga implementações concretas.
-// Campos não usados por uma feature ficam simplesmente nil (ela só pega o que precisa).
+// FeatureDeps is the dependency kit ("ammo") handed to each feature at
+// registration, ports only. No feature sees concrete implementations.
+// Fields not used by a feature are simply left nil (it only takes what it needs).
 type FeatureDeps struct {
 	Log      Logger
 	Bus      EventBus
@@ -115,12 +115,12 @@ type FeatureDeps struct {
 	Sender   MessageSender
 }
 
-// Feature é uma "arma" plugável. Implementar esta interface e registrá-la basta
-// para adicionar comportamento, o núcleo permanece fechado para modificação
+// Feature is a pluggable "weapon". Implementing this interface and registering it is enough
+// to add behavior, the core remains closed for modification
 // (Open-Closed Principle).
 type Feature interface {
-	// Name identifica a feature (logs e diagnóstico).
+	// Name identifies the feature (logs and diagnostics).
 	Name() string
-	// Register liga a feature ao núcleo usando apenas as dependências (ports).
+	// Register wires the feature into the core using only the dependencies (ports).
 	Register(deps FeatureDeps) error
 }

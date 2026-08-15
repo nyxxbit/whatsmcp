@@ -10,17 +10,17 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/ports"
 )
 
-// MessageRepository persiste mensagens e recupera metadados de mídia (messages.db).
+// MessageRepository persists messages and retrieves media metadata (messages.db).
 type MessageRepository struct {
 	db *sql.DB
 }
 
 var _ ports.MessageRepository = (*MessageRepository)(nil)
 
-// NewMessageRepository cria o repositório (fail-fast: store obrigatório).
+// NewMessageRepository creates the repository (fail-fast: store is required).
 func NewMessageRepository(store *Store) *MessageRepository {
 	if store == nil {
-		panic("sqlite: MessageRepository exige Store")
+		panic("sqlite: MessageRepository requires a Store")
 	}
 	return &MessageRepository{db: store.db}
 }
@@ -31,24 +31,24 @@ const insertMessageSQL = `
 		 media_type, filename, url, media_key, file_sha256, file_enc_sha256, file_length, direct_path)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-// Save grava uma mensagem (INSERT OR REPLACE pela PK id+chat_jid).
+// Save writes a message (INSERT OR REPLACE on PK id+chat_jid).
 func (r *MessageRepository) Save(ctx context.Context, msg domain.Message) error {
 	return execInsertMessage(ctx, r.db, msg)
 }
 
-// SaveBatch grava um lote em uma única transação (histórico).
+// SaveBatch writes a batch in a single transaction (history).
 func (r *MessageRepository) SaveBatch(ctx context.Context, msgs []domain.Message) error {
 	if len(msgs) == 0 {
 		return nil
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("sqlite: iniciar transação: %w", err)
+		return fmt.Errorf("sqlite: begin transaction: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx, insertMessageSQL)
 	if err != nil {
 		_ = tx.Rollback()
-		return fmt.Errorf("sqlite: preparar insert: %w", err)
+		return fmt.Errorf("sqlite: prepare insert: %w", err)
 	}
 	defer stmt.Close()
 
@@ -56,7 +56,7 @@ func (r *MessageRepository) SaveBatch(ctx context.Context, msgs []domain.Message
 		args := messageArgs(msg)
 		if _, err := stmt.ExecContext(ctx, args...); err != nil {
 			_ = tx.Rollback()
-			return fmt.Errorf("sqlite: gravar mensagem em lote: %w", err)
+			return fmt.Errorf("sqlite: save message in batch: %w", err)
 		}
 	}
 	return tx.Commit()
@@ -64,12 +64,12 @@ func (r *MessageRepository) SaveBatch(ctx context.Context, msgs []domain.Message
 
 func execInsertMessage(ctx context.Context, db *sql.DB, msg domain.Message) error {
 	if _, err := db.ExecContext(ctx, insertMessageSQL, messageArgs(msg)...); err != nil {
-		return fmt.Errorf("sqlite: gravar mensagem: %w", err)
+		return fmt.Errorf("sqlite: save message: %w", err)
 	}
 	return nil
 }
 
-// messageArgs achata uma Message nas 14 colunas da tabela (mídia → vazios quando ausente).
+// messageArgs flattens a Message into the table's 14 columns (media → empty when absent).
 func messageArgs(msg domain.Message) []any {
 	var (
 		mediaType, filename, url, directPath string
@@ -89,7 +89,7 @@ func messageArgs(msg domain.Message) []any {
 	return []any{
 		msg.ID(),
 		msg.Chat().String(),
-		msg.Sender().User(), // bare user, como o legado grava
+		msg.Sender().User(), // bare user, as the legacy code writes it
 		msg.Content(),
 		msg.Timestamp(),
 		msg.IsFromMe(),
@@ -97,8 +97,8 @@ func messageArgs(msg domain.Message) []any {
 	}
 }
 
-// FindMedia recupera os metadados de mídia de uma mensagem para download.
-// Devolve domain.ErrMediaNotFound se a mensagem não existir ou não tiver mídia.
+// FindMedia retrieves a message's media metadata for download.
+// Returns domain.ErrMediaNotFound if the message doesn't exist or has no media.
 func (r *MessageRepository) FindMedia(ctx context.Context, messageID, chatJID string) (domain.Media, error) {
 	var (
 		mediaType, filename, url, directPath sql.NullString
@@ -114,7 +114,7 @@ func (r *MessageRepository) FindMedia(ctx context.Context, messageID, chatJID st
 		return domain.Media{}, domain.ErrMediaNotFound
 	}
 	if err != nil {
-		return domain.Media{}, fmt.Errorf("sqlite: consultar mídia: %w", err)
+		return domain.Media{}, fmt.Errorf("sqlite: query media: %w", err)
 	}
 	if mediaType.String == "" {
 		return domain.Media{}, domain.ErrMediaNotFound

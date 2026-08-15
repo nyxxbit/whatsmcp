@@ -1,5 +1,6 @@
-// Package messaging é a feature (bounded context) de mensagens: persiste o que
-// chega (ao vivo e por history sync) e expõe o caso de uso de download de mídia.
+// Package messaging is the messages feature (bounded context): it persists
+// what arrives (live and via history sync) and exposes the media download use
+// case.
 package messaging
 
 import (
@@ -10,22 +11,23 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/ports"
 )
 
-// Feature assina os eventos de mensagem e os grava nos repositórios. Plugável:
-// adicioná-la ao Registry não exige tocar em nenhuma outra parte (Open-Closed).
+// Feature subscribes to message events and stores them in the repositories.
+// Pluggable: adding it to the Registry requires no changes to any other part
+// (Open-Closed).
 type Feature struct{}
 
 var _ ports.Feature = Feature{}
 
-// New cria a feature.
+// New creates the feature.
 func New() Feature { return Feature{} }
 
-// Name identifica a feature.
+// Name identifies the feature.
 func (Feature) Name() string { return "messaging" }
 
-// Register liga a feature ao núcleo (DIP: só ports). Fail-fast nas dependências.
+// Register wires the feature into the core (DIP: ports only). Fail-fast on dependencies.
 func (Feature) Register(deps ports.FeatureDeps) error {
 	if deps.Messages == nil || deps.Chats == nil {
-		return fmt.Errorf("messaging: Messages e Chats são obrigatórios")
+		return fmt.Errorf("messaging: Messages and Chats are required")
 	}
 	log := deps.Log.With("feature", "messaging")
 
@@ -35,7 +37,7 @@ func (Feature) Register(deps ports.FeatureDeps) error {
 			return nil
 		}
 		if err := deps.Chats.Upsert(ctx, received.Chat()); err != nil {
-			log.Warn("falha ao gravar conversa", "err", err)
+			log.Warn("failed to save chat", "err", err)
 		}
 		return deps.Messages.Save(ctx, received.Message())
 	})
@@ -47,13 +49,13 @@ func (Feature) Register(deps ports.FeatureDeps) error {
 		}
 		for _, chat := range synced.Chats() {
 			if err := deps.Chats.Upsert(ctx, chat); err != nil {
-				log.Warn("falha ao gravar conversa do histórico", "err", err)
+				log.Warn("failed to save chat from history", "err", err)
 			}
 		}
 		if err := deps.Messages.SaveBatch(ctx, synced.Messages()); err != nil {
 			return err
 		}
-		log.Info("histórico persistido", "conversas", len(synced.Chats()), "mensagens", len(synced.Messages()))
+		log.Info("history persisted", "chats", len(synced.Chats()), "messages", len(synced.Messages()))
 		return nil
 	})
 

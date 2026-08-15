@@ -2,10 +2,10 @@ package domain
 
 import "errors"
 
-// ErrInvalidLabel sinaliza uma etiqueta sem identificador (fail-fast).
-var ErrInvalidLabel = errors.New("domain: etiqueta inválida")
+// ErrInvalidLabel signals a label without an identifier (fail-fast).
+var ErrInvalidLabel = errors.New("domain: invalid label")
 
-// Label é um Value Object imutável de etiqueta do WhatsApp Business (ex: "Work").
+// Label is an immutable Value Object for a WhatsApp Business label (e.g. "Work").
 type Label struct {
 	id      string
 	name    string
@@ -13,7 +13,7 @@ type Label struct {
 	deleted bool
 }
 
-// NewLabel constrói uma etiqueta (fail-fast: id obrigatório).
+// NewLabel builds a label (fail-fast: id required).
 func NewLabel(id, name string, color int, deleted bool) (Label, error) {
 	if id == "" {
 		return Label{}, ErrInvalidLabel
@@ -21,27 +21,27 @@ func NewLabel(id, name string, color int, deleted bool) (Label, error) {
 	return Label{id: id, name: name, color: color, deleted: deleted}, nil
 }
 
-// ID devolve o identificador da etiqueta.
+// ID returns the label's identifier.
 func (l Label) ID() string { return l.id }
 
-// Name devolve o nome da etiqueta.
+// Name returns the label's name.
 func (l Label) Name() string { return l.name }
 
-// Color devolve o índice de cor da etiqueta.
+// Color returns the label's color index.
 func (l Label) Color() int { return l.color }
 
-// Deleted indica se a etiqueta foi removida.
+// Deleted reports whether the label was removed.
 func (l Label) Deleted() bool { return l.deleted }
 
-// LabelAssociation é um Value Object imutável: o vínculo entre uma etiqueta e
-// uma conversa (chat etiquetado ou desetiquetado).
+// LabelAssociation is an immutable Value Object: the link between a label and
+// a chat (chat labeled or unlabeled).
 type LabelAssociation struct {
 	labelID string
 	chat    JID
 	labeled bool
 }
 
-// NewLabelAssociation constrói o vínculo (fail-fast: labelID e chat obrigatórios).
+// NewLabelAssociation builds the link (fail-fast: labelID and chat required).
 func NewLabelAssociation(labelID string, chat JID, labeled bool) (LabelAssociation, error) {
 	if labelID == "" {
 		return LabelAssociation{}, ErrInvalidLabel
@@ -52,11 +52,11 @@ func NewLabelAssociation(labelID string, chat JID, labeled bool) (LabelAssociati
 	return LabelAssociation{labelID: labelID, chat: chat, labeled: labeled}, nil
 }
 
-// LabelID devolve o id da etiqueta.
+// LabelID returns the label's id.
 func (a LabelAssociation) LabelID() string { return a.labelID }
 
-// Chat devolve o JID da conversa associada.
+// Chat returns the JID of the associated chat.
 func (a LabelAssociation) Chat() JID { return a.chat }
 
-// Labeled indica se a conversa está etiquetada (true) ou foi desetiquetada (false).
+// Labeled reports whether the chat is labeled (true) or was unlabeled (false).
 func (a LabelAssociation) Labeled() bool { return a.labeled }

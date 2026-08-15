@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-// ErrInvalidMessage sinaliza uma mensagem sem o mínimo válido (fail-fast).
-var ErrInvalidMessage = errors.New("domain: mensagem inválida")
+// ErrInvalidMessage signals a message without the minimum required validity (fail-fast).
+var ErrInvalidMessage = errors.New("domain: invalid message")
 
-// Message é a Entidade central do bounded context Messaging: uma mensagem de
-// chat com identidade (id + chat). Pode carregar mídia opcional.
+// Message is the central Entity of the Messaging bounded context: a chat
+// message with identity (id + chat). It may carry optional media.
 type Message struct {
 	id        string
 	chat      JID
@@ -20,8 +20,8 @@ type Message struct {
 	media     *Media
 }
 
-// NewMessage constrói uma mensagem válida. Fail-fast: exige um chat e ao menos
-// conteúdo OU mídia (espelha o "skip if no content and no media" do legado).
+// NewMessage builds a valid message. Fail-fast: requires a chat and at least
+// content OR media (mirrors the legacy "skip if no content and no media").
 func NewMessage(id string, chat, sender JID, content string, ts time.Time, isFromMe bool, media *Media) (Message, error) {
 	if chat.IsZero() {
 		return Message{}, ErrInvalidMessage
@@ -40,26 +40,26 @@ func NewMessage(id string, chat, sender JID, content string, ts time.Time, isFro
 	}, nil
 }
 
-// ID devolve o identificador da mensagem (pode ser vazio em itens de histórico).
+// ID returns the message's identifier (may be empty for history items).
 func (m Message) ID() string { return m.id }
 
-// Chat devolve o JID da conversa.
+// Chat returns the chat's JID.
 func (m Message) Chat() JID { return m.chat }
 
-// Sender devolve o JID de quem enviou.
+// Sender returns the JID of whoever sent it.
 func (m Message) Sender() JID { return m.sender }
 
-// Content devolve o texto (vazio para mídia sem legenda).
+// Content returns the text (empty for media without a caption).
 func (m Message) Content() string { return m.content }
 
-// Timestamp devolve o instante da mensagem.
+// Timestamp returns the message's timestamp.
 func (m Message) Timestamp() time.Time { return m.timestamp }
 
-// IsFromMe indica se foi enviada pela própria conta.
+// IsFromMe reports whether it was sent by the account's own user.
 func (m Message) IsFromMe() bool { return m.isFromMe }
 
-// Media devolve a mídia anexa (nil se for só texto).
+// Media returns the attached media (nil if text-only).
 func (m Message) Media() *Media { return m.media }
 
-// HasMedia indica se a mensagem carrega mídia.
+// HasMedia reports whether the message carries media.
 func (m Message) HasMedia() bool { return m.media != nil }

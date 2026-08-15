@@ -1,5 +1,5 @@
-// Package logging fornece a implementação do Port ports.Logger usando log/slog
-// (estruturado), com rotação por tamanho e um Null Object para testes.
+// Package logging provides the implementation of the ports.Logger Port using
+// log/slog (structured), with size-based rotation and a Null Object for tests.
 package logging
 
 import (
@@ -9,27 +9,27 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/ports"
 )
 
-// SlogLogger adapta log/slog ao contrato ports.Logger (padrão Adapter).
+// SlogLogger adapts log/slog to the ports.Logger contract (Adapter pattern).
 type SlogLogger struct {
 	l *slog.Logger
 }
 
 var _ ports.Logger = (*SlogLogger)(nil)
 
-// New cria um logger estruturado escrevendo em w (use RotatingFile em produção).
+// New creates a structured logger writing to w (use RotatingFile in production).
 func New(w io.Writer) *SlogLogger {
 	handler := slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})
 	return &SlogLogger{l: slog.New(handler)}
 }
 
-// Info registra em nível informativo.
+// Info logs at the informational level.
 func (s *SlogLogger) Info(msg string, args ...any) { s.l.Info(msg, args...) }
 
-// Warn registra em nível de alerta.
+// Warn logs at the warning level.
 func (s *SlogLogger) Warn(msg string, args ...any) { s.l.Warn(msg, args...) }
 
-// Error registra em nível de erro.
+// Error logs at the error level.
 func (s *SlogLogger) Error(msg string, args ...any) { s.l.Error(msg, args...) }
 
-// With deriva um logger com campos fixos (contexto), sem mutar o original.
+// With derives a logger with fixed fields (context), without mutating the original.
 func (s *SlogLogger) With(args ...any) ports.Logger { return &SlogLogger{l: s.l.With(args...)} }

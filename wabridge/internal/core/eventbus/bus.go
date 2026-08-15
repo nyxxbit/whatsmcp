@@ -1,4 +1,4 @@
-// Package eventbus implementa o EventBus do núcleo (Observer/Mediator).
+// Package eventbus implements the core's EventBus (Observer/Mediator).
 package eventbus
 
 import (
@@ -9,37 +9,37 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/ports"
 )
 
-// InMemoryBus é um EventBus síncrono e thread-safe. Simples por design (KISS):
-// entrega cada evento aos handlers na ordem de assinatura. Um handler que
-// falha é registrado no Logger e NÃO derruba os demais (isolamento de falha).
+// InMemoryBus is a synchronous, thread-safe EventBus. Simple by design (KISS):
+// it delivers each event to handlers in subscription order. A handler that
+// fails is logged to the Logger and does NOT bring down the others (failure isolation).
 type InMemoryBus struct {
 	mu       sync.RWMutex
 	handlers map[string][]ports.EventHandler
 	log      ports.Logger
 }
 
-// Garante em tempo de compilação que InMemoryBus satisfaz a porta.
+// Ensures at compile time that InMemoryBus satisfies the port.
 var _ ports.EventBus = (*InMemoryBus)(nil)
 
-// New cria um EventBus. O logger é obrigatório (fail-fast).
+// New creates an EventBus. The logger is required (fail-fast).
 func New(log ports.Logger) *InMemoryBus {
 	if log == nil {
-		panic("eventbus: logger é obrigatório")
+		panic("eventbus: logger is required")
 	}
 	return &InMemoryBus{handlers: make(map[string][]ports.EventHandler), log: log}
 }
 
-// Subscribe registra um handler para um tipo de evento (fail-fast em args inválidos).
+// Subscribe registers a handler for an event type (fail-fast on invalid args).
 func (b *InMemoryBus) Subscribe(eventName string, handler ports.EventHandler) {
 	if eventName == "" || handler == nil {
-		panic("eventbus: subscribe exige eventName e handler")
+		panic("eventbus: subscribe requires eventName and handler")
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.handlers[eventName] = append(b.handlers[eventName], handler)
 }
 
-// Publish entrega o evento a todos os handlers assinados para o seu nome.
+// Publish delivers the event to all handlers subscribed to its name.
 func (b *InMemoryBus) Publish(ctx context.Context, evt domain.Event) {
 	if evt == nil {
 		return
@@ -50,7 +50,7 @@ func (b *InMemoryBus) Publish(ctx context.Context, evt domain.Event) {
 
 	for _, handle := range subscribers {
 		if err := handle(ctx, evt); err != nil {
-			b.log.Error("handler de evento falhou", "event", evt.EventName(), "err", err)
+			b.log.Error("event handler failed", "event", evt.EventName(), "err", err)
 		}
 	}
 }

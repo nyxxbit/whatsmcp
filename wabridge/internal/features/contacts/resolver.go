@@ -1,6 +1,6 @@
-// Package contacts é a feature (bounded context) de contatos: resolve a
-// identidade COMPLETA de um JID (nome + número + JID cru) e enriquece os logs/
-// eventos com tudo isso, visão ampla, sem trocar um dado pelo outro.
+// Package contacts is the contacts feature (bounded context): it resolves the
+// FULL identity of a JID (name + number + raw JID) and enriches logs/events
+// with all of it, a broad view, without trading one piece of data for another.
 package contacts
 
 import (
@@ -10,22 +10,22 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/ports"
 )
 
-// Resolver é um use case (Application Service) que resolve a identidade de um JID.
+// Resolver is a use case (Application Service) that resolves the identity of a JID.
 type Resolver struct {
 	repo ports.ContactRepository
 }
 
-// NewResolver cria o use case (dependência obrigatória, fail-fast).
+// NewResolver creates the use case (required dependency, fail-fast).
 func NewResolver(repo ports.ContactRepository) *Resolver {
 	if repo == nil {
-		panic("contacts: ContactRepository é obrigatório")
+		panic("contacts: ContactRepository is required")
 	}
 	return &Resolver{repo: repo}
 }
 
-// Identify devolve a identidade completa (nome + número + JID). Programação
-// positiva: nunca quebra o fluxo de quem chama, em falha de infra, cai numa
-// identidade só com o JID (sempre exibível).
+// Identify returns the full identity (name + number + JID). Positive
+// programming: it never breaks the caller's flow; on infra failure, it falls
+// back to an identity with just the JID (always displayable).
 func (r *Resolver) Identify(ctx context.Context, jid domain.JID) domain.Identity {
 	id, err := r.repo.Identify(ctx, jid)
 	if err != nil {
@@ -38,8 +38,9 @@ func (r *Resolver) Identify(ctx context.Context, jid domain.JID) domain.Identity
 	return id
 }
 
-// Resolve devolve uma string única "Nome (número)" (ou o que houver), conveniência
-// para usos de uma linha. Para visão ampla com campos separados, use Identify.
+// Resolve returns a single "Name (number)" string (or whatever is available),
+// a convenience for one-line uses. For a broad view with separate fields, use
+// Identify.
 func (r *Resolver) Resolve(ctx context.Context, jid domain.JID) string {
 	return r.Identify(ctx, jid).Display()
 }

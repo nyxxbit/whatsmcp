@@ -2,20 +2,21 @@ package logging
 
 import "github.com/nyxxbit/wabridge/internal/core/ports"
 
-// Noop é um Logger que descarta tudo: Null Object Pattern (GoF). Útil em testes
-// e onde o log é opcional, evitando checagens de nil espalhadas (programação positiva).
+// Noop is a Logger that discards everything: Null Object Pattern (GoF). Useful
+// in tests and wherever logging is optional, avoiding nil checks scattered
+// around the codebase (positive programming).
 type Noop struct{}
 
 var _ ports.Logger = Noop{}
 
-// Info descarta.
+// Info discards.
 func (Noop) Info(string, ...any) {}
 
-// Warn descarta.
+// Warn discards.
 func (Noop) Warn(string, ...any) {}
 
-// Error descarta.
+// Error discards.
 func (Noop) Error(string, ...any) {}
 
-// With devolve o próprio Null Object.
+// With returns the Null Object itself.
 func (Noop) With(...any) ports.Logger { return Noop{} }

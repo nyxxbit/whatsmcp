@@ -8,11 +8,12 @@ import (
 	"math/rand"
 )
 
-// analyzeOggOpus extrai a duração e gera um waveform de um Ogg Opus (para a nota
-// de voz aparecer com a "ondinha" no WhatsApp). Porta a lógica do bridge legado.
+// analyzeOggOpus extracts the duration and generates a waveform from an Ogg
+// Opus (so the voice note shows the little "waveform" bump in WhatsApp). Ports
+// the legacy bridge's logic.
 func analyzeOggOpus(data []byte) (duration uint32, waveform []byte, err error) {
 	if len(data) < 4 || string(data[0:4]) != "OggS" {
-		return 0, nil, fmt.Errorf("não é um Ogg válido (sem assinatura OggS)")
+		return 0, nil, fmt.Errorf("not a valid Ogg file (missing OggS signature)")
 	}
 
 	var (
@@ -44,7 +45,7 @@ func analyzeOggOpus(data []byte) (duration uint32, waveform []byte, err error) {
 		if !foundOpusHead && pageSeqNum <= 1 {
 			pageData := data[i : i+pageSize]
 			if headPos := bytes.Index(pageData, []byte("OpusHead")); headPos >= 0 && headPos+12 < len(pageData) {
-				headPos += 8 // pula o marcador "OpusHead"
+				headPos += 8 // skip past the "OpusHead" marker
 				if headPos+12 <= len(pageData) {
 					preSkip = binary.LittleEndian.Uint16(pageData[headPos+10 : headPos+12])
 					sampleRate = binary.LittleEndian.Uint32(pageData[headPos+12 : headPos+16])
@@ -62,7 +63,7 @@ func analyzeOggOpus(data []byte) (duration uint32, waveform []byte, err error) {
 		seconds := float64(lastGranule-uint64(preSkip)) / float64(sampleRate)
 		duration = uint32(math.Ceil(seconds))
 	} else {
-		duration = uint32(float64(len(data)) / 2000.0) // estimativa grosseira
+		duration = uint32(float64(len(data)) / 2000.0) // rough estimate
 	}
 	if duration < 1 {
 		duration = 1
@@ -72,8 +73,8 @@ func analyzeOggOpus(data []byte) (duration uint32, waveform []byte, err error) {
 	return duration, placeholderWaveform(duration), nil
 }
 
-// placeholderWaveform gera um waveform sintético de 64 bytes, determinístico por
-// duração (mesma duração → mesmo desenho), com aparência natural.
+// placeholderWaveform generates a synthetic 64-byte waveform, deterministic by
+// duration (same duration → same shape), with a natural-looking appearance.
 func placeholderWaveform(duration uint32) []byte {
 	const waveformLength = 64
 	waveform := make([]byte, waveformLength)
@@ -88,7 +89,7 @@ func placeholderWaveform(duration uint32) []byte {
 		val += (baseAmplitude / 2) * math.Sin(pos*math.Pi*frequencyFactor*16)
 		val += (rng.Float64() - 0.5) * 15
 		val *= 0.7 + 0.3*math.Sin(pos*math.Pi) // fade-in/out
-		val += 50                              // baseline de voz
+		val += 50                              // voice baseline
 		if val < 0 {
 			val = 0
 		} else if val > 100 {

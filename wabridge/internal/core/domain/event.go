@@ -2,17 +2,17 @@ package domain
 
 import "time"
 
-// Event é um evento de domínio IMUTÁVEL: carrega um fato ocorrido, nunca
-// comportamento. Eventos são publicados no EventBus e consumidos pelas features,
-// permitindo baixo acoplamento entre bounded contexts.
+// Event is an IMMUTABLE domain event: it carries a fact that occurred, never
+// behavior. Events are published on the EventBus and consumed by features,
+// enabling low coupling between bounded contexts.
 type Event interface {
-	// EventName identifica o tipo do evento (chave de roteamento no bus).
+	// EventName identifies the event type (routing key on the bus).
 	EventName() string
-	// OccurredAt é o instante em que o fato aconteceu.
+	// OccurredAt is the instant the fact happened.
 	OccurredAt() time.Time
 }
 
-// Nomes de evento (chaves de roteamento), centralizados para evitar typos.
+// Event names (routing keys), centralized to avoid typos.
 const (
 	EventMessageReceived  = "messaging.message_received"
 	EventHistorySynced    = "messaging.history_synced"
@@ -25,15 +25,15 @@ const (
 
 // ── Messaging ──────────────────────────────────────────────────────────────
 
-// MessageReceived é emitido quando uma mensagem chega ao bridge (ao vivo). Carrega
-// a Mensagem e a Conversa já resolvida (nome), para a feature messaging persistir
-// ambas sem precisar reconsultar nada.
+// MessageReceived is emitted when a message arrives at the bridge (live). It carries
+// the Message and the Chat already resolved (name), so the messaging feature can persist
+// both without needing to re-query anything.
 type MessageReceived struct {
 	msg  Message
 	chat Chat
 }
 
-// NewMessageReceived constrói o evento (fail-fast: remetente da mensagem obrigatório).
+// NewMessageReceived builds the event (fail-fast: message sender required).
 func NewMessageReceived(msg Message, chat Chat) (MessageReceived, error) {
 	if msg.Chat().IsZero() {
 		return MessageReceived{}, ErrInvalidMessage
@@ -41,149 +41,149 @@ func NewMessageReceived(msg Message, chat Chat) (MessageReceived, error) {
 	return MessageReceived{msg: msg, chat: chat}, nil
 }
 
-// EventName implementa Event.
+// EventName implements Event.
 func (MessageReceived) EventName() string { return EventMessageReceived }
 
-// OccurredAt implementa Event (instante da mensagem).
+// OccurredAt implements Event (message timestamp).
 func (e MessageReceived) OccurredAt() time.Time { return e.msg.Timestamp() }
 
-// Message devolve a mensagem recebida.
+// Message returns the received message.
 func (e MessageReceived) Message() Message { return e.msg }
 
-// Chat devolve a conversa (com nome resolvido).
+// Chat returns the chat (with resolved name).
 func (e MessageReceived) Chat() Chat { return e.chat }
 
-// From devolve o remetente (conveniência para a feature de contatos).
+// From returns the sender (convenience for the contacts feature).
 func (e MessageReceived) From() JID { return e.msg.Sender() }
 
-// Body devolve o texto da mensagem (conveniência).
+// Body returns the message text (convenience).
 func (e MessageReceived) Body() string { return e.msg.Content() }
 
-// IsFromMe indica se a mensagem é da própria conta.
+// IsFromMe reports whether the message is from the account's own user.
 func (e MessageReceived) IsFromMe() bool { return e.msg.IsFromMe() }
 
-// HistorySynced é emitido quando o servidor envia um lote de histórico. Carrega
-// as conversas e mensagens já traduzidas para o domínio (persistência em lote).
+// HistorySynced is emitted when the server sends a history batch. It carries
+// the chats and messages already translated into the domain (batch persistence).
 type HistorySynced struct {
 	chats    []Chat
 	messages []Message
 	at       time.Time
 }
 
-// NewHistorySynced constrói o evento de sincronização de histórico.
+// NewHistorySynced builds the history sync event.
 func NewHistorySynced(chats []Chat, messages []Message, at time.Time) HistorySynced {
 	return HistorySynced{chats: chats, messages: messages, at: at}
 }
 
-// EventName implementa Event.
+// EventName implements Event.
 func (HistorySynced) EventName() string { return EventHistorySynced }
 
-// OccurredAt implementa Event.
+// OccurredAt implements Event.
 func (e HistorySynced) OccurredAt() time.Time { return e.at }
 
-// Chats devolve as conversas sincronizadas.
+// Chats returns the synced chats.
 func (e HistorySynced) Chats() []Chat { return e.chats }
 
-// Messages devolve as mensagens sincronizadas.
+// Messages returns the synced messages.
 func (e HistorySynced) Messages() []Message { return e.messages }
 
 // ── Labels ─────────────────────────────────────────────────────────────────
 
-// LabelEdited é emitido quando uma etiqueta é criada/renomeada/removida.
+// LabelEdited is emitted when a label is created/renamed/removed.
 type LabelEdited struct {
 	label Label
 	at    time.Time
 }
 
-// NewLabelEdited constrói o evento.
+// NewLabelEdited builds the event.
 func NewLabelEdited(label Label, at time.Time) LabelEdited {
 	return LabelEdited{label: label, at: at}
 }
 
-// EventName implementa Event.
+// EventName implements Event.
 func (LabelEdited) EventName() string { return EventLabelEdited }
 
-// OccurredAt implementa Event.
+// OccurredAt implements Event.
 func (e LabelEdited) OccurredAt() time.Time { return e.at }
 
-// Label devolve a etiqueta editada.
+// Label returns the edited label.
 func (e LabelEdited) Label() Label { return e.label }
 
-// ChatLabeled é emitido quando uma conversa é etiquetada/desetiquetada.
+// ChatLabeled is emitted when a chat is labeled/unlabeled.
 type ChatLabeled struct {
 	assoc LabelAssociation
 	at    time.Time
 }
 
-// NewChatLabeled constrói o evento.
+// NewChatLabeled builds the event.
 func NewChatLabeled(assoc LabelAssociation, at time.Time) ChatLabeled {
 	return ChatLabeled{assoc: assoc, at: at}
 }
 
-// EventName implementa Event.
+// EventName implements Event.
 func (ChatLabeled) EventName() string { return EventChatLabeled }
 
-// OccurredAt implementa Event.
+// OccurredAt implements Event.
 func (e ChatLabeled) OccurredAt() time.Time { return e.at }
 
-// Association devolve o vínculo etiqueta↔conversa.
+// Association returns the label-to-chat link.
 func (e ChatLabeled) Association() LabelAssociation { return e.assoc }
 
 // ── Session ────────────────────────────────────────────────────────────────
 
-// SessionConnected é emitido quando a sessão fica online.
+// SessionConnected is emitted when the session comes online.
 type SessionConnected struct {
 	account string
 	at      time.Time
 }
 
-// NewSessionConnected constrói o evento.
+// NewSessionConnected builds the event.
 func NewSessionConnected(account string, at time.Time) SessionConnected {
 	return SessionConnected{account: account, at: at}
 }
 
-// EventName implementa Event.
+// EventName implements Event.
 func (SessionConnected) EventName() string { return EventSessionConnected }
 
-// OccurredAt implementa Event.
+// OccurredAt implements Event.
 func (e SessionConnected) OccurredAt() time.Time { return e.at }
 
-// Account devolve a conta conectada.
+// Account returns the connected account.
 func (e SessionConnected) Account() string { return e.account }
 
-// SessionLoggedOut é emitido quando o aparelho é deslogado (precisa de novo QR).
+// SessionLoggedOut is emitted when the device is logged out (needs a new QR).
 type SessionLoggedOut struct {
 	at time.Time
 }
 
-// NewSessionLoggedOut constrói o evento.
+// NewSessionLoggedOut builds the event.
 func NewSessionLoggedOut(at time.Time) SessionLoggedOut {
 	return SessionLoggedOut{at: at}
 }
 
-// EventName implementa Event.
+// EventName implements Event.
 func (SessionLoggedOut) EventName() string { return EventSessionLoggedOut }
 
-// OccurredAt implementa Event.
+// OccurredAt implements Event.
 func (e SessionLoggedOut) OccurredAt() time.Time { return e.at }
 
-// QRCodeReady é emitido quando um novo QR de pareamento é gerado e salvo em disco.
-// A camada de entrega (tray) reage abrindo a imagem, o domínio não conhece UI.
+// QRCodeReady is emitted when a new pairing QR is generated and saved to disk.
+// The delivery layer (tray) reacts by opening the image; the domain knows nothing about UI.
 type QRCodeReady struct {
 	path string
 	at   time.Time
 }
 
-// NewQRCodeReady constrói o evento.
+// NewQRCodeReady builds the event.
 func NewQRCodeReady(path string, at time.Time) QRCodeReady {
 	return QRCodeReady{path: path, at: at}
 }
 
-// EventName implementa Event.
+// EventName implements Event.
 func (QRCodeReady) EventName() string { return EventQRCodeReady }
 
-// OccurredAt implementa Event.
+// OccurredAt implements Event.
 func (e QRCodeReady) OccurredAt() time.Time { return e.at }
 
-// Path devolve o caminho do PNG do QR salvo.
+// Path returns the path to the saved QR PNG.
 func (e QRCodeReady) Path() string { return e.path }

@@ -5,18 +5,18 @@ import (
 	"time"
 )
 
-// ErrChatNameUnknown é retornado quando ainda não há nome salvo para a conversa.
-var ErrChatNameUnknown = errors.New("domain: nome da conversa desconhecido")
+// ErrChatNameUnknown is returned when there is no saved name for the chat yet.
+var ErrChatNameUnknown = errors.New("domain: unknown chat name")
 
-// Chat é um Value Object imutável que representa uma conversa: identidade (JID),
-// nome legível e o instante da última mensagem (usado para ordenar conversas).
+// Chat is an immutable Value Object representing a chat: identity (JID),
+// readable name and the timestamp of the last message (used to order chats).
 type Chat struct {
 	jid             JID
 	name            string
 	lastMessageTime time.Time
 }
 
-// NewChat constrói uma conversa (fail-fast: JID obrigatório).
+// NewChat builds a chat (fail-fast: JID required).
 func NewChat(jid JID, name string, lastMessageTime time.Time) (Chat, error) {
 	if jid.IsZero() {
 		return Chat{}, ErrInvalidJID
@@ -24,11 +24,11 @@ func NewChat(jid JID, name string, lastMessageTime time.Time) (Chat, error) {
 	return Chat{jid: jid, name: name, lastMessageTime: lastMessageTime}, nil
 }
 
-// JID devolve o identificador da conversa.
+// JID returns the chat's identifier.
 func (c Chat) JID() JID { return c.jid }
 
-// Name devolve o nome legível da conversa.
+// Name returns the chat's readable name.
 func (c Chat) Name() string { return c.name }
 
-// LastMessageTime devolve o instante da última mensagem.
+// LastMessageTime returns the timestamp of the last message.
 func (c Chat) LastMessageTime() time.Time { return c.lastMessageTime }

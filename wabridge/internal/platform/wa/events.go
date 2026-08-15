@@ -11,9 +11,10 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/domain"
 )
 
-// handleEvent é o dispatcher registrado no whatsmeow. Mensagens/histórico vão
-// para uma fila (processamento assíncrono por 1 worker, para não travar o
-// dispatcher num history sync grande); o resto vira evento de domínio na hora.
+// handleEvent is the dispatcher registered with whatsmeow. Messages/history go
+// into a queue (asynchronous processing by a single worker, so a large
+// history sync doesn't block the dispatcher); everything else becomes a
+// domain event immediately.
 func (c *Client) handleEvent(evt any) {
 	switch v := evt.(type) {
 	case *events.Message:
@@ -26,10 +27,10 @@ func (c *Client) handleEvent(evt any) {
 		c.onLabelAssociation(v)
 	case *events.Connected:
 		c.publish(domain.NewSessionConnected(c.accountUser(), time.Now()))
-		c.log.Info("conectado ao WhatsApp", "conta", c.accountUser())
+		c.log.Info("connected to WhatsApp", "account", c.accountUser())
 	case *events.LoggedOut:
 		c.publish(domain.NewSessionLoggedOut(time.Now()))
-		c.log.Warn("aparelho deslogado, precisa reconectar (QR)")
+		c.log.Warn("device logged out, needs to reconnect (QR)")
 	}
 }
 
@@ -37,11 +38,11 @@ func (c *Client) enqueue(evt any) {
 	select {
 	case c.queue <- evt:
 	default:
-		c.log.Warn("fila de eventos cheia, descartando evento")
+		c.log.Warn("event queue full, dropping event")
 	}
 }
 
-// worker processa a fila em ordem (1 goroutine = sem concorrência de escrita).
+// worker processes the queue in order (1 goroutine = no write concurrency).
 func (c *Client) worker() {
 	for evt := range c.queue {
 		switch v := evt.(type) {
@@ -53,25 +54,25 @@ func (c *Client) worker() {
 	}
 }
 
-// onMessage traduz uma mensagem ao vivo em MessageReceived (com a conversa resolvida).
+// onMessage translates a live message into MessageReceived (with the chat resolved).
 func (c *Client) onMessage(v *events.Message) {
 	chatJID := v.Info.Chat.String()
 	dj, err := domain.NewJID(chatJID)
 	if err != nil {
-		c.log.Warn("JID de chat inválido", "jid", chatJID, "err", err)
+		c.log.Warn("invalid chat JID", "jid", chatJID, "err", err)
 		return
 	}
 	content := extractText(v.Message)
 	media := extractMedia(v.Message)
 	if content == "" && media == nil {
-		return // sem texto e sem mídia: nada a fazer (igual ao legado)
+		return // no text and no media: nothing to do (same as legacy)
 	}
 	name := c.chatName(v.Info.Chat, chatJID, nil, v.Info.Sender.User)
 	sender := senderJID(v.Info.Sender, dj)
 
 	msg, err := domain.NewMessage(v.Info.ID, dj, sender, content, v.Info.Timestamp, v.Info.IsFromMe, media)
 	if err != nil {
-		c.log.Warn("mensagem inválida ao traduzir", "err", err)
+		c.log.Warn("invalid message while translating", "err", err)
 		return
 	}
 	chat, err := domain.NewChat(dj, name, v.Info.Timestamp)
@@ -85,7 +86,7 @@ func (c *Client) onMessage(v *events.Message) {
 	c.publish(received)
 }
 
-// onHistorySync traduz um lote de histórico em HistorySynced (persistência em lote).
+// onHistorySync translates a history batch into HistorySynced (batch persistence).
 func (c *Client) onHistorySync(v *events.HistorySync) {
 	var (
 		chats []domain.Chat
@@ -141,7 +142,7 @@ func (c *Client) onHistorySync(v *events.HistorySync) {
 		}
 	}
 	c.publish(domain.NewHistorySynced(chats, msgs, time.Now()))
-	c.log.Info("history sync processado", "conversas", len(v.Data.GetConversations()), "mensagens", len(msgs))
+	c.log.Info("history sync processed", "chats", len(v.Data.GetConversations()), "messages", len(msgs))
 }
 
 func (c *Client) onLabelEdit(v *events.LabelEdit) {
@@ -164,12 +165,12 @@ func (c *Client) onLabelAssociation(v *events.LabelAssociationChat) {
 	c.publish(domain.NewChatLabeled(assoc, time.Now()))
 }
 
-// publish entrega um evento de domínio no bus.
+// publish delivers a domain event onto the bus.
 func (c *Client) publish(evt domain.Event) {
 	c.bus.Publish(context.Background(), evt)
 }
 
-// accountUser devolve o número da conta autenticada ("" se deslogado).
+// accountUser returns the authenticated account's number ("" if logged out).
 func (c *Client) accountUser() string {
 	if c.wm.Store.ID != nil {
 		return c.wm.Store.ID.User
@@ -177,9 +178,10 @@ func (c *Client) accountUser() string {
 	return ""
 }
 
-// senderJID converte o remetente ao vivo (types.JID) em domain.JID, SEM o sufixo
-// de agent/device (ex.: 100000000000002:11 → 100000000000002), senão o lid_map não
-// casa e o número não resolve. Cai no chat se falhar.
+// senderJID converts the live sender (types.JID) into a domain.JID, WITHOUT
+// the agent/device suffix (e.g. 100000000000002:11 → 100000000000002),
+// otherwise it won't match lid_map and the number won't resolve. Falls back
+// to the chat on failure.
 func senderJID(sender types.JID, fallback domain.JID) domain.JID {
 	if dj, err := domain.NewJID(sender.ToNonAD().String()); err == nil {
 		return dj
@@ -187,8 +189,8 @@ func senderJID(sender types.JID, fallback domain.JID) domain.JID {
 	return fallback
 }
 
-// historySenderJID resolve o remetente de uma mensagem de histórico (participante,
-// própria conta ou o JID da conversa), também sem agent/device.
+// historySenderJID resolves the sender of a history message (participant, own
+// account, or the chat's JID), also without agent/device.
 func historySenderJID(isFromMe bool, participant, account string, chat types.JID) domain.JID {
 	var raw string
 	switch {

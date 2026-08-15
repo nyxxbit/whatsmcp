@@ -17,7 +17,7 @@ type fakeMediaRepo struct {
 	err   error
 }
 
-func (r fakeMediaRepo) Save(context.Context, domain.Message) error      { return nil }
+func (r fakeMediaRepo) Save(context.Context, domain.Message) error        { return nil }
 func (r fakeMediaRepo) SaveBatch(context.Context, []domain.Message) error { return nil }
 func (r fakeMediaRepo) FindMedia(context.Context, string, string) (domain.Media, error) {
 	return r.media, r.err
@@ -58,29 +58,29 @@ func TestDownloader_baixaEUsaCache(t *testing.T) {
 		t.Fatalf("filename = %q", res.Filename())
 	}
 	if _, err := os.Stat(filepath.Join(dir, "5511@s.whatsapp.net", "report.pdf")); err != nil {
-		t.Fatalf("arquivo não salvo: %v", err)
+		t.Fatalf("file not saved: %v", err)
 	}
 
-	// Segunda chamada: cache hit, fetcher NÃO deve ser chamado de novo.
+	// Second call: cache hit, fetcher should NOT be called again.
 	if _, err := d.Download(context.Background(), "ID", "5511@s.whatsapp.net"); err != nil {
 		t.Fatalf("Download (cache): %v", err)
 	}
 	if fetcher.calls != 1 {
-		t.Fatalf("fetcher chamado %d vezes, esperava 1 (cache)", fetcher.calls)
+		t.Fatalf("fetcher called %d times, expected 1 (cache)", fetcher.calls)
 	}
 }
 
 func TestDownloader_propagaMidiaInexistente(t *testing.T) {
 	d := messaging.NewDownloader(fakeMediaRepo{err: domain.ErrMediaNotFound}, &countingFetcher{}, t.TempDir(), logging.Noop{})
 	if _, err := d.Download(context.Background(), "ID", "chat"); !errors.Is(err, domain.ErrMediaNotFound) {
-		t.Fatalf("esperava ErrMediaNotFound, veio %v", err)
+		t.Fatalf("expected ErrMediaNotFound, got %v", err)
 	}
 }
 
 func TestDownloader_recusaMetadadosIncompletos(t *testing.T) {
-	incomplete, _ := domain.NewMedia(domain.MediaSpec{Kind: domain.MediaImage, Filename: "x.jpg"}) // sem url/keys
+	incomplete, _ := domain.NewMedia(domain.MediaSpec{Kind: domain.MediaImage, Filename: "x.jpg"}) // no url/keys
 	d := messaging.NewDownloader(fakeMediaRepo{media: incomplete}, &countingFetcher{}, t.TempDir(), logging.Noop{})
 	if _, err := d.Download(context.Background(), "ID", "chat"); err == nil {
-		t.Fatal("esperava erro de metadados incompletos")
+		t.Fatal("expected an incomplete metadata error")
 	}
 }

@@ -7,9 +7,10 @@ import (
 
 const defaultMaxLogBytes = 1 << 20 // 1 MiB
 
-// RotatingFile é um io.Writer que rotaciona o arquivo ao ultrapassar maxBytes,
-// guardando um backup ".1". Sem dependência externa (KISS), resolve de raiz o
-// problema do log gigante que travava o Notepad (ver feedback "logs limitados").
+// RotatingFile is an io.Writer that rotates the file once it exceeds maxBytes,
+// keeping a single ".1" backup. No external dependency (KISS); this solves at
+// the root the problem of a giant log file that becomes painfully slow to open
+// in a plain text editor.
 type RotatingFile struct {
 	mu       sync.Mutex
 	path     string
@@ -18,7 +19,7 @@ type RotatingFile struct {
 	file     *os.File
 }
 
-// NewRotatingFile abre/cria o arquivo de log com rotação (fail-fast em erro de IO).
+// NewRotatingFile opens/creates the rotating log file (fail-fast on I/O error).
 func NewRotatingFile(path string, maxBytes int64) (*RotatingFile, error) {
 	if maxBytes <= 0 {
 		maxBytes = defaultMaxLogBytes
@@ -44,7 +45,7 @@ func (rf *RotatingFile) open() error {
 	return nil
 }
 
-// Write implementa io.Writer, rotacionando antes de estourar o limite.
+// Write implements io.Writer, rotating before exceeding the limit.
 func (rf *RotatingFile) Write(p []byte) (int, error) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -60,17 +61,17 @@ func (rf *RotatingFile) Write(p []byte) (int, error) {
 
 func (rf *RotatingFile) rotate() error {
 	_ = rf.file.Close()
-	_ = os.Rename(rf.path, rf.path+".1") // backup único; sobrescreve o anterior
+	_ = os.Rename(rf.path, rf.path+".1") // single backup; overwrites the previous one
 	rf.size = 0
 	return rf.open()
 }
 
-// Close fecha o arquivo subjacente.
+// Close closes the underlying file.
 func (rf *RotatingFile) Close() error {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	return rf.file.Close()
 }
 
-// Path devolve o caminho do arquivo (usado pelo viewer HTTP /logs).
+// Path returns the file path (used by the /logs HTTP viewer).
 func (rf *RotatingFile) Path() string { return rf.path }

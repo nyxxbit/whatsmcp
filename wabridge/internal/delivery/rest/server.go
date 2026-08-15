@@ -1,6 +1,7 @@
-// Package rest é a camada de entrega HTTP: recria EXATAMENTE o contrato do bridge
-// legado (/api/send, /api/download, /api/sync-labels, /logs) sobre as portas do
-// núcleo. Usa um ServeMux próprio (sem estado global) e só depende de interfaces.
+// Package rest is the HTTP delivery layer: it recreates EXACTLY the contract
+// of the legacy bridge (/api/send, /api/download, /api/sync-labels, /logs) on
+// top of the core's ports. Uses its own ServeMux (no global state) and depends
+// only on interfaces.
 package rest
 
 import (
@@ -11,7 +12,7 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/ports"
 )
 
-// Config reúne as dependências da API (injetadas no composition root).
+// Config gathers the API's dependencies (injected at the composition root).
 type Config struct {
 	Sender      ports.MessageSender
 	Downloader  ports.MediaDownloader
@@ -20,7 +21,7 @@ type Config struct {
 	Log         ports.Logger
 }
 
-// Server expõe a API REST. Depende apenas de ports (DIP).
+// Server exposes the REST API. Depends only on ports (DIP).
 type Server struct {
 	sender      ports.MessageSender
 	downloader  ports.MediaDownloader
@@ -29,13 +30,13 @@ type Server struct {
 	log         ports.Logger
 }
 
-// NewServer monta o servidor (fail-fast nas dependências obrigatórias).
+// NewServer builds the server (fail-fast on required dependencies).
 func NewServer(cfg Config) (*Server, error) {
 	if cfg.Sender == nil || cfg.Downloader == nil || cfg.LabelSyncer == nil || cfg.Log == nil {
-		return nil, fmt.Errorf("rest: Sender, Downloader, LabelSyncer e Log são obrigatórios")
+		return nil, fmt.Errorf("rest: Sender, Downloader, LabelSyncer, and Log are required")
 	}
 	if cfg.LogPath == "" {
-		return nil, fmt.Errorf("rest: LogPath é obrigatório para o /logs")
+		return nil, fmt.Errorf("rest: LogPath is required for /logs")
 	}
 	return &Server{
 		sender:      cfg.Sender,
@@ -46,8 +47,8 @@ func NewServer(cfg Config) (*Server, error) {
 	}, nil
 }
 
-// Handler monta o roteamento. Caminhos não mapeados (inclusive "/") devolvem 404 -
-// is what existing health checks rely on ("404 means the server is up").
+// Handler sets up the routing. Unmapped paths (including "/") return 404:
+// that is what existing health checks rely on ("404 means the server is up").
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/send", s.handleSend)
@@ -57,13 +58,14 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// Start sobe o servidor HTTP (bloqueante; rode em goroutine no composition root).
+// Start brings up the HTTP server (blocking; run it in a goroutine from the
+// composition root).
 func (s *Server) Start(addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
-		ReadHeaderTimeout: 10 * time.Second, // mitiga slowloris (boa prática)
+		ReadHeaderTimeout: 10 * time.Second, // mitigates slowloris (best practice)
 	}
-	s.log.Info("REST no ar", "addr", addr)
+	s.log.Info("REST is up", "addr", addr)
 	return srv.ListenAndServe()
 }

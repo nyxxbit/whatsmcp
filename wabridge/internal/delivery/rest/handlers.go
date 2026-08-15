@@ -7,8 +7,9 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/domain"
 )
 
-// handleSend recria POST /api/send: texto puro (message) ou mídia (media_path,
-// com message virando legenda). Resposta {success, message}, contrato do legado.
+// handleSend recreates POST /api/send: plain text (message) or media
+// (media_path, with message becoming the caption). Response {success,
+// message}, legacy contract.
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -41,7 +42,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		err = s.sender.SendText(ctx, to, req.Message)
 	}
 	if err != nil {
-		s.log.Warn("falha ao enviar", "para", req.Recipient, "err", err)
+		s.log.Warn("failed to send", "to", req.Recipient, "err", err)
 		writeSend(w, false, err.Error())
 		return
 	}
@@ -56,8 +57,8 @@ func writeSend(w http.ResponseWriter, success bool, message string) {
 	_ = json.NewEncoder(w).Encode(sendResponse{Success: success, Message: message})
 }
 
-// handleDownload recria POST /api/download: baixa (ou usa cache) a mídia de uma
-// mensagem e devolve {success, message, filename, path}.
+// handleDownload recreates POST /api/download: downloads (or serves from
+// cache) a message's media and returns {success, message, filename, path}.
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -76,7 +77,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	res, err := s.downloader.Download(r.Context(), req.MessageID, req.ChatJID)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
-		s.log.Warn("falha no download", "msg", req.MessageID, "err", err)
+		s.log.Warn("download failed", "msg", req.MessageID, "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(downloadResponse{
 			Success: false,
@@ -92,7 +93,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleSyncLabels recria /api/sync-labels: dispara o fullSync de etiquetas.
+// handleSyncLabels recreates /api/sync-labels: triggers the label fullSync.
 func (s *Server) handleSyncLabels(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := s.labelSyncer.SyncLabels(r.Context()); err != nil {

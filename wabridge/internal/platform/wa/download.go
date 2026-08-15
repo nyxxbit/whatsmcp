@@ -8,16 +8,17 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/domain"
 )
 
-// Fetch baixa e descriptografa os bytes de uma mídia a partir dos seus metadados
-// (camada baixa do download; o caso de uso de alto nível mora na feature messaging).
+// Fetch downloads and decrypts a media's bytes from its metadata (the
+// low-level download layer; the high-level use case lives in the messaging
+// feature).
 func (c *Client) Fetch(ctx context.Context, media domain.Media) ([]byte, error) {
 	waType, ok := mediaKindToWA(media.Kind())
 	if !ok {
-		return nil, fmt.Errorf("wa: tipo de mídia não suportado: %s", media.Kind())
+		return nil, fmt.Errorf("wa: unsupported media type: %s", media.Kind())
 	}
 	directPath := media.DirectPath()
 	if directPath == "" {
-		directPath = extractDirectPathFromURL(media.URL()) // fallback do legado
+		directPath = extractDirectPathFromURL(media.URL()) // legacy fallback
 	}
 	dl := downloadable{
 		url:        media.URL(),
@@ -30,12 +31,12 @@ func (c *Client) Fetch(ctx context.Context, media domain.Media) ([]byte, error) 
 	}
 	data, err := c.wm.Download(ctx, dl)
 	if err != nil {
-		return nil, fmt.Errorf("wa: baixar mídia: %w", err)
+		return nil, fmt.Errorf("wa: download media: %w", err)
 	}
 	return data, nil
 }
 
-// extractDirectPathFromURL deriva o direct_path da URL quando o real não foi salvo.
+// extractDirectPathFromURL derives the direct_path from the URL when the real one wasn't saved.
 func extractDirectPathFromURL(url string) string {
 	parts := strings.SplitN(url, ".net/", 2)
 	if len(parts) < 2 {

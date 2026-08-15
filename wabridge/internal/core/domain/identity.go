@@ -2,18 +2,18 @@ package domain
 
 import "strings"
 
-// Identity é a identidade resolvida de um remetente - "VISÃO AMPLA": carrega o
-// NOME, o NÚMERO e o JID cru ao mesmo tempo, nunca um no lugar do outro. Nome e
-// telefone podem vir vazios (desconhecidos); o JID está sempre presente.
+// Identity is a sender's resolved identity, "WIDE VIEW": it carries the
+// NAME, the NUMBER and the raw JID all at once, never one instead of another. Name and
+// phone may come back empty (unknown); the JID is always present.
 //
-// Value Object imutável; igualdade por valor.
+// Immutable Value Object; equality by value.
 type Identity struct {
 	jid   JID
 	name  string
 	phone string
 }
 
-// NewIdentity cria a identidade (fail-fast: JID obrigatório; nome/telefone opcionais).
+// NewIdentity creates the identity (fail-fast: JID required; name/phone optional).
 func NewIdentity(jid JID, name, phone string) (Identity, error) {
 	if jid.IsZero() {
 		return Identity{}, ErrInvalidJID
@@ -21,23 +21,23 @@ func NewIdentity(jid JID, name, phone string) (Identity, error) {
 	return Identity{jid: jid, name: strings.TrimSpace(name), phone: strings.TrimSpace(phone)}, nil
 }
 
-// JID devolve o identificador cru (sempre presente).
+// JID returns the raw identifier (always present).
 func (i Identity) JID() JID { return i.jid }
 
-// Name devolve o nome legível ("" se desconhecido).
+// Name returns the readable name ("" if unknown).
 func (i Identity) Name() string { return i.name }
 
-// Phone devolve o número ("" se não resolvido, ex.: @lid sem mapeamento).
+// Phone returns the number ("" if not resolved, e.g. @lid without a mapping).
 func (i Identity) Phone() string { return i.phone }
 
-// HasName indica se o nome foi resolvido.
+// HasName reports whether the name was resolved.
 func (i Identity) HasName() bool { return i.name != "" }
 
-// HasPhone indica se o número foi resolvido.
+// HasPhone reports whether the number was resolved.
 func (i Identity) HasPhone() bool { return i.phone != "" }
 
-// Display monta uma string única com tudo que se sabe - "Nome (numero)", ou só o
-// que houver, caindo no user do JID em último caso. Para logs/relatórios de uma linha.
+// Display builds a single string with everything known: "Name (number)", or just
+// whatever is available, falling back to the JID's user as a last resort. For one-line logs/reports.
 func (i Identity) Display() string {
 	switch {
 	case i.name != "" && i.phone != "":

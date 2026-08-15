@@ -1,10 +1,12 @@
-// Command bridge é o composition root do wabridge: o ÚNICO lugar que conhece
-// implementações concretas. Aqui se monta a injeção de dependências (adapters) e
-// se registram as features (armas). Nenhuma regra de negócio mora neste arquivo.
+// Command bridge is the composition root of wabridge: the ONLY place that
+// knows concrete implementations. This is where dependency injection (adapters)
+// is wired up and features are registered. No business rule lives in
+// this file.
 //
-// Fluxo: chdir p/ a pasta do exe → instância única (porta) → logging com rotação
-// → persistência SQLite → adapter whatsmeow → features no Registry → REST (mesmo
-// contrato do legado) → bandeja (systray) que bloqueia a main thread.
+// Flow: chdir to the exe folder → single instance (port) → logging with
+// rotation → SQLite persistence → whatsmeow adapter → features in the Registry
+// → REST (same contract as the legacy bridge) → tray (systray) that blocks the
+// main thread.
 package main
 
 import (
@@ -36,7 +38,7 @@ func main() {
 }
 
 func run() error {
-	// cwd = pasta do exe (store/, logs e qr.png usam caminhos relativos).
+	// cwd = the exe's folder (store/, logs, and qr.png use relative paths).
 	if exe, err := os.Executable(); err == nil {
 		_ = os.Chdir(filepath.Dir(exe))
 	}
@@ -44,26 +46,27 @@ func run() error {
 	addr := envOr("WABRIDGE_ADDR", ":8080")
 	storeDir := envOr("WABRIDGE_STORE_DIR", "store")
 
-	// Instância única: se o endereço já responde, já tem um bridge rodando.
+	// Single instance: if the address already responds, a bridge is already running.
 	if c, err := net.DialTimeout("tcp", localDial(addr), time.Second); err == nil {
 		_ = c.Close()
 		return nil
 	}
 
-	// stderr → arquivo truncado a cada boot: captura panic sem nunca crescer
-	// (o build -H=windowsgui não tem console). O log normal vai pro RotatingFile.
+	// stderr → file truncated on every boot: captures panics without ever
+	// growing (the -H=windowsgui build has no console). Normal logging goes to
+	// the RotatingFile.
 	if f, err := os.OpenFile("wabridge.panic.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644); err == nil {
 		os.Stderr = f
 	}
 
-	// ── Logging profissional (rotação por tamanho; fim do Notepad) ──
+	// ── Production-grade logging (size-based rotation; no more Notepad) ──
 	logFile, err := logging.NewRotatingFile("wabridge.log", 1<<20)
 	if err != nil {
-		return fmt.Errorf("abrir log: %w", err)
+		return fmt.Errorf("open log: %w", err)
 	}
 	log := logging.New(logFile)
 
-	// ── Persistência (mesmo schema do legado) ──
+	// ── Persistence (same schema as the legacy bridge) ──
 	store, err := sqlite.Open(storeDir + "/messages.db")
 	if err != nil {
 		return err
@@ -76,7 +79,7 @@ func run() error {
 		return err
 	}
 
-	// ── Adapter whatsmeow (traduz eventos da lib → eventos de domínio no bus) ──
+	// ── whatsmeow adapter (translates library events → domain events on the bus) ──
 	bus := eventbus.New(log)
 	adapter, err := wa.New(wa.Config{
 		WhatsappDBPath: storeDir + "/whatsapp.db",
@@ -89,10 +92,10 @@ func run() error {
 		return err
 	}
 
-	// Caso de uso de download (Repository + Fetcher + cache em disco).
+	// Download use case (Repository + Fetcher + on-disk cache).
 	downloader := messaging.NewDownloader(msgRepo, adapter, storeDir, log)
 
-	// ── Features (armas plugáveis): adicionar nova = só mais um .Add(...) ──
+	// Features: adding a new one is just another .Add(...) call
 	reg := registry.New(log).
 		Add(messaging.New()).
 		Add(labels.New()).
@@ -110,7 +113,7 @@ func run() error {
 		return err
 	}
 
-	// ── Entrega REST (MESMO contrato: /api/send, /api/download, /api/sync-labels, /logs) ──
+	// ── REST delivery (SAME contract: /api/send, /api/download, /api/sync-labels, /logs) ──
 	server, err := rest.NewServer(rest.Config{
 		Sender:      adapter,
 		Downloader:  downloader,
@@ -123,11 +126,11 @@ func run() error {
 	}
 	go func() {
 		if err := server.Start(addr); err != nil {
-			log.Error("servidor REST encerrado", "err", err)
+			log.Error("REST server stopped", "err", err)
 		}
 	}()
 
-	// Encerramento limpo acionado pelo "Sair" da bandeja.
+	// Clean shutdown triggered by "Quit" in the tray.
 	shutdown := func() {
 		adapter.Disconnect()
 		_ = contactRepo.Close()
@@ -136,17 +139,19 @@ func run() error {
 		os.Exit(0)
 	}
 
-	// Conexão unificada: sessão válida → reconecta; deslogado → QR (tray abre o PNG).
-	// WABRIDGE_NO_CONNECT=1 pula este passo (smoke test do boot/REST sem tocar no WhatsApp).
+	// Unified connection: valid session → reconnects; logged out → QR code (tray
+	// opens the PNG).
+	// WABRIDGE_NO_CONNECT=1 skips this step (smoke test of boot/REST without
+	// touching WhatsApp).
 	if envOr("WABRIDGE_NO_CONNECT", "") != "1" {
 		adapter.Connect()
 	} else {
-		log.Warn("WABRIDGE_NO_CONNECT=1: conexão com o WhatsApp pulada (modo teste)")
+		log.Warn("WABRIDGE_NO_CONNECT=1: WhatsApp connection skipped (test mode)")
 	}
 
-	log.Info("wabridge no ar", "log", logFile.Path(), "rest", addr, "store", storeDir)
+	log.Info("wabridge is up", "log", logFile.Path(), "rest", addr, "store", storeDir)
 
-	// Bandeja bloqueia a main thread até "Sair".
+	// Tray blocks the main thread until "Quit".
 	tray.New(adapter, bus, log, "http://127.0.0.1"+addr+"/logs", shutdown).Run()
 	return nil
 }
@@ -158,7 +163,7 @@ func envOr(key, def string) string {
 	return def
 }
 
-// localDial transforma ":8080" em "127.0.0.1:8080" para o teste de instância única.
+// localDial turns ":8080" into "127.0.0.1:8080" for the single-instance check.
 func localDial(addr string) string {
 	if strings.HasPrefix(addr, ":") {
 		return "127.0.0.1" + addr

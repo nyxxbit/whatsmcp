@@ -8,9 +8,10 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/ports"
 )
 
-// waLogAdapter conecta o logger do whatsmeow (printf) ao nosso ports.Logger
-// (estruturado + rotação). Mantém o log enxuto como o nível WARN do bridge legado:
-// Info/Debug são descartados; só Warn/Error passam adiante (fim do log gigante).
+// waLogAdapter connects whatsmeow's logger (printf-style) to our ports.Logger
+// (structured + rotating). Keeps logging lean, matching the legacy bridge's
+// WARN level: Info/Debug are discarded; only Warn/Error get passed through
+// (no more giant log files).
 type waLogAdapter struct {
 	log    ports.Logger
 	module string
@@ -30,8 +31,8 @@ func (a *waLogAdapter) Errorf(msg string, args ...interface{}) {
 	a.log.Error(fmt.Sprintf(msg, args...), "wa_module", a.module)
 }
 
-func (a *waLogAdapter) Infof(string, ...interface{})  {} // descartado (log enxuto)
-func (a *waLogAdapter) Debugf(string, ...interface{}) {} // descartado (log enxuto)
+func (a *waLogAdapter) Infof(string, ...interface{})  {} // discarded (lean logging)
+func (a *waLogAdapter) Debugf(string, ...interface{}) {} // discarded (lean logging)
 
 func (a *waLogAdapter) Sub(module string) waLog.Logger {
 	return &waLogAdapter{log: a.log, module: a.module + "/" + module}

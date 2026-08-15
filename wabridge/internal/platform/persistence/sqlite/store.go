@@ -1,7 +1,7 @@
-// Package sqlite implementa os repositórios sobre SQLite, adapter de
-// persistência da arquitetura hexagonal. O schema é idêntico ao do bridge legado
-// (messages.db), so existing consumers and the MCP server keep reading the
-// mesma base sem qualquer migração.
+// Package sqlite implements the repositories on top of SQLite, the
+// persistence adapter of the hexagonal architecture. The schema is identical
+// to the legacy bridge (messages.db), so existing consumers and the MCP
+// server keep reading the same database without any migration.
 package sqlite
 
 import (
@@ -10,29 +10,30 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3" // driver CGO "sqlite3"
+	_ "github.com/mattn/go-sqlite3" // CGO "sqlite3" driver
 )
 
-// Store detém a conexão com messages.db e garante o schema. É compartilhado pelos
-// repositórios de mensagem, conversa e etiqueta (todos na mesma base).
+// Store holds the connection to messages.db and ensures the schema. It's
+// shared by the message, chat, and label repositories (all on the same
+// database).
 type Store struct {
 	db *sql.DB
 }
 
-// Open abre (criando se preciso) o banco de mensagens, o diretório e o schema.
-// Fail-fast: qualquer erro de IO/SQL aborta na hora.
+// Open opens (creating if needed) the messages database, its directory, and
+// the schema. Fail-fast: any I/O/SQL error aborts immediately.
 func Open(path string) (*Store, error) {
 	if path == "" {
-		return nil, fmt.Errorf("sqlite: caminho do banco vazio")
+		return nil, fmt.Errorf("sqlite: empty database path")
 	}
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("sqlite: criar diretório %q: %w", dir, err)
+			return nil, fmt.Errorf("sqlite: create directory %q: %w", dir, err)
 		}
 	}
 	db, err := sql.Open("sqlite3", "file:"+path+"?_foreign_keys=on")
 	if err != nil {
-		return nil, fmt.Errorf("sqlite: abrir %q: %w", path, err)
+		return nil, fmt.Errorf("sqlite: open %q: %w", path, err)
 	}
 	if err := createSchema(db); err != nil {
 		_ = db.Close()
@@ -41,7 +42,7 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// createSchema cria as tabelas se não existirem (idêntico ao legado).
+// createSchema creates the tables if they don't exist (identical to the legacy schema).
 func createSchema(db *sql.DB) error {
 	const ddl = `
 		CREATE TABLE IF NOT EXISTS chats (
@@ -83,18 +84,18 @@ func createSchema(db *sql.DB) error {
 			PRIMARY KEY (label_id, chat_jid)
 		);`
 	if _, err := db.Exec(ddl); err != nil {
-		return fmt.Errorf("sqlite: criar schema: %w", err)
+		return fmt.Errorf("sqlite: create schema: %w", err)
 	}
 	return nil
 }
 
-// DB expõe a conexão (usada pelos repositórios deste pacote).
+// DB exposes the connection (used by this package's repositories).
 func (s *Store) DB() *sql.DB { return s.db }
 
-// Close fecha a conexão.
+// Close closes the connection.
 func (s *Store) Close() error { return s.db.Close() }
 
-// boolToInt converte bool para 0/1 (formato gravado pelo legado em deleted/labeled).
+// boolToInt converts a bool to 0/1 (the format the legacy code wrote for deleted/labeled).
 func boolToInt(b bool) int {
 	if b {
 		return 1

@@ -10,7 +10,7 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/domain"
 )
 
-// extractText pega o texto de uma mensagem (conversa simples ou texto estendido).
+// extractText pulls the text out of a message (plain conversation or extended text).
 func extractText(msg *waProto.Message) string {
 	if msg == nil {
 		return ""
@@ -24,8 +24,9 @@ func extractText(msg *waProto.Message) string {
 	return ""
 }
 
-// chatName resolve o nome de exibição da conversa, na ordem do bridge legado:
-// nome já salvo → (grupo) conversa/GetGroupInfo → (contato) store → sender → JID.
+// chatName resolves the chat's display name, in the legacy bridge's order:
+// already-saved name → (group) conversation/GetGroupInfo → (contact) store →
+// sender → JID.
 func (c *Client) chatName(jid types.JID, chatJID string, conversation any, sender string) string {
 	if dj, err := domain.NewJID(chatJID); err == nil {
 		if name, err := c.chatNames.FindName(context.Background(), dj); err == nil && name != "" {
@@ -54,8 +55,9 @@ func (c *Client) groupName(jid types.JID, conversation any) string {
 	return "Group " + jid.User
 }
 
-// nameFromConversation extrai DisplayName/Name de uma conversa de history sync via
-// reflection (o tipo concreto varia entre versões do proto), porta o legado.
+// nameFromConversation extracts DisplayName/Name from a history sync
+// conversation via reflection (the concrete type varies across proto
+// versions); ports the legacy behavior.
 func nameFromConversation(conversation any) string {
 	if conversation == nil {
 		return ""

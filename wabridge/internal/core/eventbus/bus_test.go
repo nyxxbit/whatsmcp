@@ -19,7 +19,7 @@ func anEvent(t *testing.T) domain.MessageReceived {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := domain.NewChat(jid, "Peão", time.Now())
+	chat, err := domain.NewChat(jid, "Contact", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestBus_entregaAosAssinantes(t *testing.T) {
 	bus.Publish(context.Background(), anEvent(t))
 
 	if calls != 1 {
-		t.Fatalf("handler chamado %d vezes, esperava 1", calls)
+		t.Fatalf("handler called %d times, expected 1", calls)
 	}
 }
 
@@ -56,7 +56,7 @@ func TestBus_naoEntregaAEventoDeOutroNome(t *testing.T) {
 	bus.Publish(context.Background(), anEvent(t))
 
 	if called {
-		t.Fatal("handler de outro evento não deveria ser chamado")
+		t.Fatal("handler for a different event should not have been called")
 	}
 }
 
@@ -74,6 +74,6 @@ func TestBus_handlerComErroNaoDerrubaOsDemais(t *testing.T) {
 	bus.Publish(context.Background(), anEvent(t))
 
 	if !secondRan {
-		t.Fatal("o segundo handler deveria rodar mesmo com o primeiro falhando")
+		t.Fatal("the second handler should run even if the first one fails")
 	}
 }

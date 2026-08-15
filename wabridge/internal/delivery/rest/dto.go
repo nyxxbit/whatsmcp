@@ -1,7 +1,7 @@
 package rest
 
-// DTOs keep the exact JSON keys of the legacy bridge, so existing API consumers
-// server e o whisper-tool dependem deste contrato. Não renomear campos.
+// DTOs keep the exact JSON keys of the legacy bridge, so existing API
+// consumers keep working. Do not rename fields.
 
 type sendRequest struct {
 	Recipient string `json:"recipient"`

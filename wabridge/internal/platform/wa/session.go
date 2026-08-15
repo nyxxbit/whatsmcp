@@ -10,16 +10,17 @@ import (
 	"github.com/nyxxbit/wabridge/internal/core/domain"
 )
 
-// connectBackoffStart e connectBackoffMax limitam a retentativa de conexão.
+// connectBackoffStart and connectBackoffMax bound the connection retry.
 const (
 	connectBackoffStart = 5 * time.Second
 	connectBackoffMax   = 60 * time.Second
 )
 
-// Connect é o ponto único de (re)conexão (startup e botão da tray): já conectado
-// → nada; sessão válida caída → entra no laço de reconexão com backoff (auto-cura
-// após queda de internet); deslogado → QR. Serializado por mutex; protegido por
-// reconnecting/qrActive para não empilhar laços nem abrir dois canais de QR.
+// Connect is the single (re)connection entry point (startup and the tray
+// button): already connected → no-op; a valid session that dropped → enters
+// the reconnection loop with backoff (self-heals after a network outage);
+// logged out → QR. Serialized by a mutex; guarded by reconnecting/qrActive so
+// loops don't stack up and two QR channels never open at once.
 func (c *Client) Connect() {
 	c.connectMu.Lock()
 	switch {
@@ -29,7 +30,7 @@ func (c *Client) Connect() {
 	case c.wm.Store.ID != nil:
 		if c.reconnecting {
 			c.connectMu.Unlock()
-			return // já há um laço de reconexão em andamento
+			return // a reconnection loop is already running
 		}
 		c.reconnecting = true
 		c.connectMu.Unlock()
@@ -37,7 +38,7 @@ func (c *Client) Connect() {
 		return
 	case c.qrActive:
 		c.connectMu.Unlock()
-		c.log.Info("pareamento por QR já em andamento")
+		c.log.Info("QR pairing already in progress")
 		return
 	}
 	c.qrActive = true
@@ -53,11 +54,12 @@ func (c *Client) Connect() {
 	}()
 }
 
-// connectWithRetry tenta conectar a sessão existente até conseguir, com backoff
-// exponencial. Corrige o buraco em que uma falha de conexão INICIAL (ex.: bridge
-// (re)iniciado com a rede fora) deixava o bridge preso, o autoreconnect do
-// whatsmeow só reage a quedas PÓS-conexão, não à primeira tentativa que falha.
-// Depois que conecta uma vez, o autoreconnect do whatsmeow assume as quedas.
+// connectWithRetry tries to connect the existing session until it succeeds,
+// with exponential backoff. Fixes the gap where an INITIAL connection failure
+// (e.g. the bridge (re)starting with the network down) left the bridge stuck:
+// whatsmeow's autoreconnect only reacts to drops AFTER a connection, not to a
+// first attempt that fails. Once it connects once, whatsmeow's autoreconnect
+// takes over subsequent drops.
 func (c *Client) connectWithRetry() {
 	defer func() {
 		c.connectMu.Lock()
@@ -65,23 +67,23 @@ func (c *Client) connectWithRetry() {
 		c.connectMu.Unlock()
 	}()
 
-	c.wm.Disconnect() // parte de um estado limpo
+	c.wm.Disconnect() // start from a clean state
 	time.Sleep(300 * time.Millisecond)
 
 	backoff := connectBackoffStart
 	for attempt := 1; ; attempt++ {
 		if c.wm.Store.ID == nil {
-			return // virou logout no meio, o fluxo de QR cuida
+			return // turned into a logout midway; the QR flow handles it
 		}
 		if c.wm.IsConnected() {
-			return // já está conectado (autoreconnect cuidou)
+			return // already connected (autoreconnect handled it)
 		}
 		err := c.wm.Connect()
 		if err == nil || c.wm.IsConnected() {
-			c.log.Info("conectado ao WhatsApp", "tentativa", attempt)
+			c.log.Info("connected to WhatsApp", "attempt", attempt)
 			return
 		}
-		c.log.Warn("conexão falhou; nova tentativa", "tentativa", attempt, "em", backoff.String(), "err", err)
+		c.log.Warn("connection failed; retrying", "attempt", attempt, "in", backoff.String(), "err", err)
 		time.Sleep(backoff)
 		if backoff < connectBackoffMax {
 			if backoff *= 2; backoff > connectBackoffMax {
@@ -91,10 +93,10 @@ func (c *Client) connectWithRetry() {
 	}
 }
 
-// Disconnect derruba a conexão (mantém a sessão; reconecta depois).
+// Disconnect drops the connection (keeps the session; reconnects later).
 func (c *Client) Disconnect() { c.wm.Disconnect() }
 
-// Status reflete o estado real da conexão para a tray/diagnóstico.
+// Status reflects the real connection state for the tray/diagnostics.
 func (c *Client) Status() domain.SessionStatus {
 	switch {
 	case c.wm.Store.ID != nil && c.wm.IsConnected():
@@ -106,16 +108,17 @@ func (c *Client) Status() domain.SessionStatus {
 	}
 }
 
-// SyncLabels dispara o fullSync de app state, emitindo os eventos de etiqueta.
-// EmitAppStateEventsOnFullSync precisa estar ligado, senão o fullSync re-aplica
-// mas NÃO re-emite label_edit/label_jid (o bug que zerava as etiquetas).
+// SyncLabels triggers the app state fullSync, emitting label events.
+// EmitAppStateEventsOnFullSync must be turned on, otherwise fullSync
+// re-applies the state but does NOT re-emit label_edit/label_jid (the bug
+// that wiped out labels).
 func (c *Client) SyncLabels(ctx context.Context) error {
 	if c.wm.Store.ID == nil {
-		return fmt.Errorf("wa: sem sessão para sincronizar etiquetas")
+		return fmt.Errorf("wa: no session to sync labels")
 	}
 	c.wm.EmitAppStateEventsOnFullSync = true
 	if err := c.wm.FetchAppState(ctx, appstate.WAPatchRegular, true, false); err != nil {
-		return fmt.Errorf("wa: sincronizar etiquetas: %w", err)
+		return fmt.Errorf("wa: sync labels: %w", err)
 	}
 	return nil
 }
