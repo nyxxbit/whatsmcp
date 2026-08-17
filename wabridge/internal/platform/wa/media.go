@@ -48,6 +48,16 @@ func mediaStrategy(ext string) (whatsmeow.MediaType, string) {
 // extractMedia translates the media of a protocol message into domain.Media
 // (nil when there is no media). Already includes the direct_path from the
 // proto (reliable download).
+//
+// INCOMPLETE, in two ways. It handles images and documents only, so audio,
+// video, stickers and round videos are dropped. And the filename comes from
+// time.Now() at second resolution, which collides during a history sync: many
+// messages are processed within the same second, and a download that finds an
+// existing file treats it as a success, so one message ends up serving another
+// message's bytes.
+//
+// See extractMediaInfo in ../../../whatsapp-bridge/main.go, which covers every
+// type and derives the filename from the message timestamp and ID.
 func extractMedia(msg *waProto.Message) *domain.Media {
 	if msg == nil {
 		return nil
