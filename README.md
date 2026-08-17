@@ -29,10 +29,25 @@ This is also the root of [lharries/whatsapp-mcp#310](https://github.com/lharries
 whatsapp-bridge/      Go daemon: whatsmeow client, SQLite store, REST API, system tray
 whatsapp-mcp-server/  MCP server exposing the store to LLM clients
 whisper-tool/         Local voice-note transcription (faster-whisper, CUDA)
-wabridge/             Clean-architecture rewrite of the bridge, in progress
+wabridge/             Clean-architecture rewrite of the bridge, incomplete
 ```
 
 The bridge owns the WhatsApp session and writes to SQLite. The MCP server reads from it. They are separate processes, so restarting the MCP server never touches the session.
+
+### Status
+
+Two bridges live in this repository and they are not interchangeable. Read this before picking one.
+
+| Component | State | Notes |
+| --- | --- | --- |
+| `whatsapp-bridge/` | **Active.** Use this one. | Every message type listed above is implemented here. This is the binary that runs. |
+| `wabridge/` | **Incomplete rewrite.** Do not use yet. | Better structure, tested per package, but message coverage stopped at plain text. See below. |
+| `whatsapp-mcp-server/` | Inherited from upstream, unchanged. | Reads the store and passes `media_type` through, so new types surface without changes here. |
+| `whisper-tool/` | Standalone utility. | Independent of the bridges; reads the media the bridge already downloaded. |
+
+**The gap in `wabridge`.** Its `extractText` reads `conversation` and `extendedTextMessage` and stops, which is the exact behaviour this project exists to fix. Captions, container types, native events, reactions and locations are not implemented there, and `extractMedia` handles images and documents only. It also names media files from the wall clock, which collides during a history sync.
+
+The rewrite was written before that work landed and has not been updated since. It is kept in the repository because the architecture is worth continuing, not because it is ready. Porting `unwrapMessage`, `extractTextContent` and `extractMediaInfo` from `whatsapp-bridge/main.go` into `translate.go` and `media.go` is what closes it.
 
 ## Running the bridge
 

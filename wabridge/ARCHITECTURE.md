@@ -4,6 +4,22 @@ A rewrite of the bridge daemon following clean architecture and DDD. The goal is
 to make new capabilities additive: adding one should not require editing existing
 files.
 
+## Status: incomplete, not the bridge to run
+
+The structure here is finished and tested per package. Message coverage is not.
+
+`extractText` in `platform/wa/translate.go` reads `conversation` and
+`extendedTextMessage` and stops. Media captions, container types (ephemeral,
+view-once, document-with-caption, edited), native events, reactions, locations,
+contacts and polls are all missing, and `extractMedia` in `platform/wa/media.go`
+handles images and documents only. Media filenames also come from the wall clock,
+which collides when a history sync processes many messages in the same second.
+
+That is the behaviour the project exists to fix, and it is implemented in
+`../whatsapp-bridge/main.go`. Closing the gap means porting `unwrapMessage`,
+`extractTextContent` and `extractMediaInfo` into the two functions named above.
+Until then, run `whatsapp-bridge`, not this.
+
 ## Shared core, pluggable features
 
 A shared core (event bus, ports, registry, domain types) is consumed by features

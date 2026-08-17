@@ -11,6 +11,17 @@ import (
 )
 
 // extractText pulls the text out of a message (plain conversation or extended text).
+//
+// INCOMPLETE. This is the gap that keeps wabridge from replacing whatsapp-bridge.
+// It misses everything the project exists to capture:
+//
+//   - media captions, so a photo sent with a caption is stored with empty text
+//   - container types (ephemeral, view-once, document-with-caption, edited), which
+//     wrap the real message; without unwrapping them the whole message is lost
+//   - native events, reactions, locations, contacts, polls
+//
+// The complete implementation lives in ../../../whatsapp-bridge/main.go as
+// unwrapMessage and extractTextContent. Port those here to close the gap.
 func extractText(msg *waProto.Message) string {
 	if msg == nil {
 		return ""
