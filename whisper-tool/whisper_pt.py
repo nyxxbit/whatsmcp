@@ -32,6 +32,8 @@ name, so prompt-based steering is not worth it.
 If a term genuinely needs fixing, substitute it AFTER transcription. That is
 deterministic and cannot invent text. See CORRECTIONS below.
 """
+import glob
+import importlib.util
 import os
 import re
 
@@ -39,6 +41,43 @@ MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
 COMPUTE = os.environ.get("WHISPER_COMPUTE", "float16")
 LANGUAGE = os.environ.get("WHISPER_LANG", "pt")
+CPU_COMPUTE = os.environ.get("WHISPER_CPU_COMPUTE", "int8")
+
+
+def register_cuda_dlls():
+    """Put the pip-installed CUDA runtime on the Windows DLL search path.
+
+    The nvidia-*-cu12 wheels drop their DLLs in site-packages/nvidia/<pkg>/bin,
+    a directory Windows never searches. ctranslate2 then fails with "Library
+    cublas64_12.dll is not found or cannot be loaded" while the file sits right
+    there, and the whole transcription run dies on the first audio. Registering
+    the directories here, before ctranslate2 is imported, is what makes the GPU
+    reachable. Returns the directories it registered.
+    """
+    if os.name != "nt":
+        return []
+    roots = []
+    spec = importlib.util.find_spec("nvidia")
+    for base in list(getattr(spec, "submodule_search_locations", None) or []):
+        roots.extend(sorted(glob.glob(os.path.join(base, "*", "bin"))))
+    spec = importlib.util.find_spec("ctranslate2")
+    if spec and spec.origin:
+        roots.append(os.path.dirname(spec.origin))
+    roots = [d for d in roots if os.path.isdir(d)]
+    for d in roots:
+        try:
+            os.add_dll_directory(d)
+        except OSError:
+            pass
+    # add_dll_directory only covers loads that go through LoadLibraryEx with
+    # altered search flags. Some ctranslate2 builds resolve their dependencies
+    # the plain way, which reads PATH, so cover that too.
+    if roots:
+        os.environ["PATH"] = os.pathsep.join(roots) + os.pathsep + os.environ.get("PATH", "")
+    return roots
+
+
+register_cuda_dlls()
 
 # Post-transcription fixes: regex -> replacement. Applied to the final text, so
 # they cannot cause the model to hallucinate. Add domain terms here rather than
@@ -49,13 +88,26 @@ _model = None
 
 
 def get_model(log=None):
-    """Return the cached model, loading it on first use."""
-    global _model
+    """Return the cached model, loading it on first use.
+
+    Falls back to the CPU when the GPU cannot be initialised. A batch of voice
+    notes taking longer beats a batch that dies on file 1 because a CUDA
+    library moved, which is exactly what happened on 17/08/2026.
+    """
+    global _model, DEVICE, COMPUTE
     if _model is None:
         from faster_whisper import WhisperModel
         if log:
             log(f"loading {MODEL} on {DEVICE} ({COMPUTE})")
-        _model = WhisperModel(MODEL, device=DEVICE, compute_type=COMPUTE)
+        try:
+            _model = WhisperModel(MODEL, device=DEVICE, compute_type=COMPUTE)
+        except Exception as exc:
+            if DEVICE == "cpu":
+                raise
+            DEVICE, COMPUTE = "cpu", CPU_COMPUTE
+            msg = f"GPU unavailable ({exc}); falling back to {DEVICE} ({COMPUTE})"
+            log(msg) if log else print(msg, flush=True)
+            _model = WhisperModel(MODEL, device=DEVICE, compute_type=COMPUTE)
     return _model
 
 
