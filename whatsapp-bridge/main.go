@@ -640,6 +640,17 @@ func shortID(id string) string {
 	return id
 }
 
+// uniqueName binds a stored media filename to its message, leaving names that already carry
+// the ID untouched so previously downloaded files keep their path.
+func uniqueName(filename, messageID string) string {
+	short := shortID(messageID)
+	if short == "" || strings.Contains(filename, short) {
+		return filename
+	}
+	ext := filepath.Ext(filename)
+	return strings.TrimSuffix(filename, ext) + "_" + short + ext
+}
+
 // Media metadata needed to fetch the file later: WhatsApp serves media by reference
 // (URL plus decryption key), never inline.
 //
@@ -875,8 +886,15 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 		return false, "", "", "", fmt.Errorf("failed to create chat directory: %v", err)
 	}
 
-	// Generate a local path for the file
-	localPath = fmt.Sprintf("%s/%s", chatDir, filename)
+	// Generate a local path for the file.
+	//
+	// The stored filename is only unique for messages saved after extractMediaInfo started
+	// appending the message ID. Older rows still hold a name built from a second-resolution
+	// timestamp, so a burst of photos sent in the same second all map to one path: the first
+	// download wins and every later message is handed those same bytes, reported as success.
+	// Binding the path to the message ID makes the cache hit below mean "this message was
+	// already fetched" instead of "some message in that second was".
+	localPath = fmt.Sprintf("%s/%s", chatDir, uniqueName(filename, messageID))
 
 	// Get absolute path
 	absPath, err := filepath.Abs(localPath)
