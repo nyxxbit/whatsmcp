@@ -101,6 +101,8 @@ func NewMessageStore() (*MessageStore, error) {
 			file_enc_sha256 BLOB,
 			file_length INTEGER,
 			direct_path TEXT,
+			quoted_id TEXT,
+			quoted_text TEXT,
 			PRIMARY KEY (id, chat_jid),
 			FOREIGN KEY (chat_jid) REFERENCES chats(jid)
 		);
@@ -122,6 +124,16 @@ func NewMessageStore() (*MessageStore, error) {
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create tables: %v", err)
+	}
+
+	// Migracao para bancos que ja existiam antes das colunas de citacao. CREATE TABLE IF NOT
+	// EXISTS nao altera tabela ja criada, entao sem isto o banco antigo continuaria sem elas.
+	// O erro de "duplicate column name" e o caso normal em quem ja migrou, e por isso e ignorado.
+	for _, col := range []string{"quoted_id TEXT", "quoted_text TEXT"} {
+		if _, e := db.Exec("ALTER TABLE messages ADD COLUMN " + col); e != nil &&
+			!strings.Contains(e.Error(), "duplicate column") {
+			fmt.Printf("aviso: nao consegui adicionar %s: %v\n", col, e)
+		}
 	}
 
 	return &MessageStore{db: db}, nil
@@ -168,17 +180,18 @@ func (store *MessageStore) StoreLabelChat(labelID, chatJID string, labeled bool)
 
 // Store a message in the database
 func (store *MessageStore) StoreMessage(id, chatJID, sender, content string, timestamp time.Time, isFromMe bool,
-	mediaType, filename, url string, mediaKey, fileSHA256, fileEncSHA256 []byte, fileLength uint64) error {
+	mediaType, filename, url string, mediaKey, fileSHA256, fileEncSHA256 []byte, fileLength uint64,
+	quotedID, quotedText string) error {
 	// Only store if there's actual content or media
 	if content == "" && mediaType == "" {
 		return nil
 	}
 
 	_, err := store.db.Exec(
-		`INSERT OR REPLACE INTO messages 
-		(id, chat_jid, sender, content, timestamp, is_from_me, media_type, filename, url, media_key, file_sha256, file_enc_sha256, file_length) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, chatJID, sender, content, timestamp, isFromMe, mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength,
+		`INSERT OR REPLACE INTO messages
+		(id, chat_jid, sender, content, timestamp, is_from_me, media_type, filename, url, media_key, file_sha256, file_enc_sha256, file_length, quoted_id, quoted_text)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, chatJID, sender, content, timestamp, isFromMe, mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength, quotedID, quotedText,
 	)
 	return err
 }
@@ -203,6 +216,65 @@ func (store *MessageStore) GetDirectPath(id, chatJID string) string {
 		return dp.String
 	}
 	return ""
+}
+
+// telefonesDoVcard tira os numeros de um vCard de contato compartilhado.
+//
+// Antes de 02/09/2026 o bridge guardava so' "[contact] Fulano" e o TELEFONE SE PERDIA. Quando
+// o Marcio mandou o contato do locador de plataforma de Piumhi, o numero nao estava em lugar
+// nenhum do banco e teve que ser pedido de novo. O nome sozinho nao serve para nada: o que se
+// faz com um contato compartilhado e' ligar para ele.
+//
+// O vCard traz o telefone em linhas do tipo:
+//
+//	TEL;type=CELL;waid=553799830144:+55 37 9983-0144
+//
+// O waid e' o que interessa, porque ja' vem no formato do WhatsApp. Quando nao ha' waid, cai
+// para o numero cru depois dos dois-pontos.
+func telefonesDoVcard(vcard string) []string {
+	vistos := map[string]bool{}
+	nums := []string{}
+	for _, linha := range strings.Split(vcard, "\n") {
+		linha = strings.TrimSpace(linha)
+		if !strings.HasPrefix(strings.ToUpper(linha), "TEL") {
+			continue
+		}
+		n := ""
+		if i := strings.Index(strings.ToLower(linha), "waid="); i >= 0 {
+			resto := linha[i+len("waid="):]
+			if j := strings.IndexAny(resto, ":;"); j >= 0 {
+				n = resto[:j]
+			} else {
+				n = resto
+			}
+		}
+		if n == "" {
+			if i := strings.LastIndex(linha, ":"); i >= 0 {
+				n = linha[i+1:]
+			}
+		}
+		// deixa so' digito e o + inicial, que e' o que serve para discar ou montar JID
+		limpo := strings.Builder{}
+		for k, r := range strings.TrimSpace(n) {
+			if r >= '0' && r <= '9' || (k == 0 && r == '+') {
+				limpo.WriteRune(r)
+			}
+		}
+		if s := limpo.String(); len(s) >= 8 && !vistos[s] {
+			vistos[s] = true
+			nums = append(nums, s)
+		}
+	}
+	return nums
+}
+
+// formataContato junta o nome exibido com os telefones achados no vCard.
+func formataContato(nome, vcard string) string {
+	s := "[contact] " + nome
+	if tels := telefonesDoVcard(vcard); len(tels) > 0 {
+		s += " - " + strings.Join(tels, ", ")
+	}
+	return s
 }
 
 // Extract the real direct path from a message proto (any media type)
@@ -306,6 +378,42 @@ func unwrapMessage(msg *waProto.Message) *waProto.Message {
 	return msg
 }
 
+// extractQuoted devolve o ID e o texto da mensagem CITADA, quando o remetente respondeu a uma
+// mensagem especifica em vez de escrever solto.
+//
+// Sem isto o "Aqui" do peao chega sem contexto: ele respondeu a uma pergunta minha e eu nao sei
+// a qual. Gabriel apontou em 04/09/2026: *"no caso ele marcou uma mensagem, deveria ter isso no
+// sistema"*. Quem trabalha em obra responde citando, porque recebe varias perguntas de uma vez;
+// perder a citacao e perder metade do sentido.
+//
+// O ContextInfo vive em cada tipo de mensagem, nao num campo comum, entao tem que ser procurado
+// um por um. O texto citado sai do proprio extractTextContent, que ja sabe ler legenda de midia.
+func extractQuoted(msg *waProto.Message) (string, string) {
+	msg = unwrapMessage(msg)
+	if msg == nil {
+		return "", ""
+	}
+	var ctx *waProto.ContextInfo
+	switch {
+	case msg.GetExtendedTextMessage().GetContextInfo() != nil:
+		ctx = msg.GetExtendedTextMessage().GetContextInfo()
+	case msg.GetImageMessage().GetContextInfo() != nil:
+		ctx = msg.GetImageMessage().GetContextInfo()
+	case msg.GetVideoMessage().GetContextInfo() != nil:
+		ctx = msg.GetVideoMessage().GetContextInfo()
+	case msg.GetAudioMessage().GetContextInfo() != nil:
+		ctx = msg.GetAudioMessage().GetContextInfo()
+	case msg.GetDocumentMessage().GetContextInfo() != nil:
+		ctx = msg.GetDocumentMessage().GetContextInfo()
+	case msg.GetStickerMessage().GetContextInfo() != nil:
+		ctx = msg.GetStickerMessage().GetContextInfo()
+	}
+	if ctx == nil || ctx.GetStanzaID() == "" {
+		return "", ""
+	}
+	return ctx.GetStanzaID(), extractTextContent(ctx.GetQuotedMessage())
+}
+
 func extractTextContent(msg *waProto.Message) string {
 	msg = unwrapMessage(msg)
 	if msg == nil {
@@ -346,9 +454,14 @@ func extractTextContent(msg *waProto.Message) string {
 		return fmt.Sprintf("[live location] %f, %f %s",
 			live.GetDegreesLatitude(), live.GetDegreesLongitude(), live.GetCaption())
 	} else if ct := msg.GetContactMessage(); ct != nil {
-		return "[contact] " + ct.GetDisplayName()
+		return formataContato(ct.GetDisplayName(), ct.GetVcard())
 	} else if cts := msg.GetContactsArrayMessage(); cts != nil {
-		return fmt.Sprintf("[%d contacts] %s", len(cts.GetContacts()), cts.GetDisplayName())
+		partes := make([]string, 0, len(cts.GetContacts()))
+		for _, c := range cts.GetContacts() {
+			partes = append(partes, formataContato(c.GetDisplayName(), c.GetVcard()))
+		}
+		return fmt.Sprintf("[%d contacts] %s | %s",
+			len(cts.GetContacts()), cts.GetDisplayName(), strings.Join(partes, " ; "))
 	} else if poll := msg.GetPollCreationMessage(); poll != nil {
 		return "[poll] " + poll.GetName()
 	} else if p3 := msg.GetPollCreationMessageV3(); p3 != nil {
@@ -426,6 +539,17 @@ func extractTextContent(msg *waProto.Message) string {
 type SendMessageResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+	// ID da mensagem que acabou de sair. Sem ele nao da' para apagar nem editar depois,
+	// que era o buraco de antes de 02/09/2026.
+	MessageID string `json:"message_id,omitempty"`
+}
+
+// RevokeRequest apaga (ou edita) uma mensagem que a gente mesmo mandou.
+// Com NewText preenchido vira edicao; vazio, apaga para todo mundo.
+type RevokeRequest struct {
+	MessageID string `json:"message_id"`
+	ChatJID   string `json:"chat_jid"`
+	NewText   string `json:"new_text,omitempty"`
 }
 
 // SendMessageRequest represents the request body for the send message API
@@ -614,13 +738,33 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 	}
 
 	// Send message
-	_, err = client.SendMessage(context.Background(), recipientJID, msg)
+	resp, err := client.SendMessage(context.Background(), recipientJID, msg)
 
 	if err != nil {
 		return false, fmt.Sprintf("Error sending message: %v", err)
 	}
 
-	return true, fmt.Sprintf("Message sent to %s", recipient)
+	// Guarda o que a gente mesmo mandou, com o ID que o servidor devolveu.
+	//
+	// Ate' 02/09/2026 o bridge so' gravava mensagem RECEBIDA, porque o StoreMessage vive nos
+	// handlers de evento. O envio proprio nao entrava, e isso custava duas coisas: nao dava
+	// para conferir se algo saiu, e principalmente **nao dava para APAGAR nem EDITAR**, porque
+	// as duas operacoes exigem o ID. Foi o que travou quando o Gabriel pediu para apagar uma
+	// pergunta ja' enviada ao locador de plataforma.
+	//
+	// Falha aqui NAO derruba o envio: a mensagem ja' foi, o banco e' so' registro.
+	if globalStore != nil && resp.ID != "" {
+		conteudo := message
+		if conteudo == "" && mediaPath != "" {
+			conteudo = "[enviado] " + filepath.Base(mediaPath)
+		}
+		if e := globalStore.StoreMessage(resp.ID, recipientJID.String(), "", conteudo,
+			resp.Timestamp, true, "", "", "", nil, nil, nil, 0, "", ""); e != nil {
+			fmt.Printf("[bridge] enviou mas nao gravou no banco: %v\n", e)
+		}
+	}
+
+	return true, resp.ID
 }
 
 // shortID trims a WhatsApp message ID to a filename-safe suffix.
@@ -729,6 +873,9 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 	// Extract media info
 	mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength := extractMediaInfo(msg.Message, msg.Info.Timestamp, msg.Info.ID)
 
+	// Quem responde citando esta dizendo A QUAL pergunta responde; sem isto o "Aqui" chega solto
+	quotedID, quotedText := extractQuoted(msg.Message)
+
 	// Skip if there's no content and no media
 	if content == "" && mediaType == "" {
 		return
@@ -749,6 +896,8 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		fileSHA256,
 		fileEncSHA256,
 		fileLength,
+		quotedID,
+		quotedText,
 	)
 
 	if err != nil {
@@ -1027,7 +1176,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 
 		fmt.Println("Received request to send message", req.Message, req.MediaPath)
 
-		// Send the message
+		// Send the message. Em caso de sucesso o segundo retorno e' o ID da mensagem.
 		success, message := sendWhatsAppMessage(client, req.Recipient, req.Message, req.MediaPath)
 		fmt.Println("Message sent", success, message)
 		// Set response headers
@@ -1038,11 +1187,72 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 
-		// Send response
+		resp := SendMessageResponse{Success: success, Message: message}
+		if success {
+			// mantem a frase antiga para nao quebrar quem le' o campo message, e devolve o
+			// ID em campo proprio, que e' o que serve para apagar ou editar depois
+			resp.MessageID = message
+			resp.Message = fmt.Sprintf("Message sent to %s", req.Recipient)
+		}
+		json.NewEncoder(w).Encode(resp)
+	})
+
+	// Apaga para todos, ou edita, uma mensagem que a gente mesmo mandou.
+	//
+	// Gabriel, 02/09/2026: *"o bot precisa ter o id das suas proprias mensagens pra editar /
+	// deletar"*. Sem o /api/send gravar o ID isto aqui nao teria como existir.
+	http.HandleFunc("/api/revoke", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req RevokeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request format", http.StatusBadRequest)
+			return
+		}
+		if req.MessageID == "" || req.ChatJID == "" {
+			http.Error(w, "message_id and chat_jid are required", http.StatusBadRequest)
+			return
+		}
+		chat, err := types.ParseJID(req.ChatJID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error parsing chat JID: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		var acao string
+		var msg *waProto.Message
+		if req.NewText == "" {
+			acao = "apagada"
+			msg = client.BuildRevoke(chat, types.EmptyJID, req.MessageID)
+		} else {
+			acao = "editada"
+			msg = client.BuildEdit(chat, req.MessageID,
+				&waProto.Message{Conversation: proto.String(req.NewText)})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := client.SendMessage(context.Background(), chat, msg); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(SendMessageResponse{
+				Success: false, Message: fmt.Sprintf("Error: %v", err)})
+			return
+		}
+
+		// espelha no banco o que aconteceu no WhatsApp, senao o registro mente
+		if globalStore != nil {
+			if req.NewText == "" {
+				_, _ = globalStore.db.Exec(
+					"DELETE FROM messages WHERE id = ? AND chat_jid = ?", req.MessageID, req.ChatJID)
+			} else {
+				_, _ = globalStore.db.Exec(
+					"UPDATE messages SET content = ? WHERE id = ? AND chat_jid = ?",
+					req.NewText, req.MessageID, req.ChatJID)
+			}
+		}
 		json.NewEncoder(w).Encode(SendMessageResponse{
-			Success: success,
-			Message: message,
-		})
+			Success: true, Message: fmt.Sprintf("Mensagem %s", acao), MessageID: req.MessageID})
 	})
 
 	// Handler for downloading media
@@ -1243,6 +1453,48 @@ func statusLoop() {
 	}
 }
 
+// reconnectLoop mantem a conexao de pe' SEM LIMITE de tentativas.
+//
+// Em 29/08/2026 as 03:20 o cabo de rede rompeu. O reconnect embutido tentou SEIS vezes,
+// todas falhando com "lookup web.whatsapp.com: no such host", e parou de tentar. O bridge
+// ficou 61 horas fora: as duas cobrancas automaticas do dia sairam com [FALHOU] em todos os
+// peoes, tres dias de diaria nao chegaram e, como passou dias sem conectar, o WhatsApp
+// derrubou o vinculo do aparelho. Foi preciso parear o QR de novo, e a midia daqueles dias
+// se perdeu junto com as chaves.
+//
+// Uma queda de rede de madrugada nao pode custar isso. Aqui a tentativa nao tem teto: espera
+// 30 s no comeco e vai dobrando ate 5 minutos, que segura o martelo no servidor e ainda assim
+// volta sozinho poucos minutos depois de a rede normalizar.
+//
+// So' tenta quando a sessao ainda e' valida (Store.ID != nil). Deslogado precisa de QR, e QR
+// depende do celular do Gabriel; nesse caso o loop fica quieto para nao gastar tentativa a toa.
+func reconnectLoop(c *whatsmeow.Client) {
+	const esperaMin, esperaMax = 30 * time.Second, 5 * time.Minute
+	espera := esperaMin
+	for {
+		time.Sleep(espera)
+		if c == nil || c.Store.ID == nil || c.IsConnected() {
+			espera = esperaMin
+			continue
+		}
+		agora := time.Now().Format("2006-01-02 15:04:05")
+		fmt.Println(agora, "[bridge] fora do ar, tentando reconectar")
+		if err := c.Connect(); err != nil {
+			fmt.Printf("%s [bridge] reconexao falhou: %v (proxima tentativa em %s)\n",
+				agora, err, espera)
+			if espera < esperaMax {
+				espera *= 2
+				if espera > esperaMax {
+					espera = esperaMax
+				}
+			}
+			continue
+		}
+		fmt.Println(agora, "[bridge] reconectado")
+		espera = esperaMin
+	}
+}
+
 // doQRPair runs QR pairing: writes qr.png, opens it and waits for the scan. Used both at
 // startup (when logged out) and by the tray's Connect button.
 func doQRPair(client *whatsmeow.Client) {
@@ -1431,6 +1683,11 @@ func runBridge() {
 			logger.Infof("Connected to WhatsApp")
 			fmt.Println(time.Now().Format("2006-01-02 15:04:05"), "[bridge] CONNECTED")
 			refreshStatus()
+		case *events.Disconnected:
+			logger.Warnf("Disconnected from WhatsApp")
+			fmt.Println(time.Now().Format("2006-01-02 15:04:05"),
+				"[bridge] DISCONNECTED, o reconnectLoop vai tentar de novo")
+			refreshStatus()
 		case *events.LoggedOut:
 			logger.Warnf("Device logged out, please scan QR code to log in again")
 			fmt.Println(time.Now().Format("2006-01-02 15:04:05"), "[bridge] LOGGED OUT, scan the QR to reconnect")
@@ -1448,6 +1705,9 @@ func runBridge() {
 
 	// Refresh the tray Status item periodically.
 	go statusLoop()
+
+	// Vigia a conexao para sempre: sem isso, uma queda de rede longa derruba o bridge de vez.
+	go reconnectLoop(client)
 
 	// Unified connect path: valid session -> reconnect; logged out -> QR pairing. Same route
 	// as the tray Connect button, guarded by qrActive.
@@ -1602,9 +1862,11 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 				var mediaKey, fileSHA256, fileEncSHA256 []byte
 				var fileLength uint64
 
+				var quotedID, quotedText string
 				if msg.Message.Message != nil {
 					mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength = extractMediaInfo(
 						msg.Message.Message, time.Unix(int64(msg.Message.GetMessageTimestamp()), 0), msg.Message.Key.GetID())
+					quotedID, quotedText = extractQuoted(msg.Message.Message)
 				}
 
 				// Log the message content for debugging
@@ -1661,6 +1923,8 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 					fileSHA256,
 					fileEncSHA256,
 					fileLength,
+					quotedID,
+					quotedText,
 				)
 				if err != nil {
 					logger.Warnf("Failed to store history message: %v", err)
