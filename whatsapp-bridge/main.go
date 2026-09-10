@@ -153,6 +153,21 @@ func (store *MessageStore) StoreChat(jid, name string, lastMessageTime time.Time
 	return err
 }
 
+// EnsureChat cria a linha do chat SO se ela ainda nao existir.
+//
+// Diferente do StoreChat, que e INSERT OR REPLACE e sobrescreveria o nome por vazio,
+// este aqui preserva o que ja esta la. Serve para o caminho de ENVIO: sem a linha em
+// chats, o INSERT em messages morre com FOREIGN KEY constraint failed e a mensagem
+// enviada nao fica registrada em lugar nenhum.
+func (store *MessageStore) EnsureChat(jid string, lastMessageTime time.Time) error {
+	_, err := store.db.Exec(
+		"INSERT INTO chats (jid, name, last_message_time) VALUES (?, '', ?) "+
+			"ON CONFLICT(jid) DO NOTHING",
+		jid, lastMessageTime,
+	)
+	return err
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1
@@ -757,6 +772,10 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 		conteudo := message
 		if conteudo == "" && mediaPath != "" {
 			conteudo = "[enviado] " + filepath.Base(mediaPath)
+		}
+		// Contato novo ainda nao tem linha em chats, e sem ela a FK derruba o INSERT.
+		if e := globalStore.EnsureChat(recipientJID.String(), resp.Timestamp); e != nil {
+			fmt.Printf("[bridge] nao criou o chat %s: %v\n", recipientJID.String(), e)
 		}
 		if e := globalStore.StoreMessage(resp.ID, recipientJID.String(), "", conteudo,
 			resp.Timestamp, true, "", "", "", nil, nil, nil, 0, "", ""); e != nil {
