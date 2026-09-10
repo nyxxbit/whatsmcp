@@ -1168,6 +1168,45 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "label sync triggered (regular fullSync)"})
 	})
 
+	// Pareamento POR CODIGO, para quando nao da para escanear o QR (o dono esta fora).
+	// Devolve os 8 caracteres que se digita no celular em Aparelhos conectados >
+	// Conectar com numero de telefone. O codigo vale ~160s; se expirar, chame de novo.
+	http.HandleFunc("/api/pair-phone", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Phone string `json:"phone"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if globalClient == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "message": "client is nil"})
+			return
+		}
+		if globalClient.Store.ID != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{"success": false,
+				"message": "already paired; no code needed"})
+			return
+		}
+		codigo, err := globalClient.PairPhone(context.Background(), req.Phone, true,
+			whatsmeow.PairClientChrome, "Chrome (Windows)")
+		if err != nil {
+			fmt.Printf("[bridge] pair-phone falhou: %v\n", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "message": err.Error()})
+			return
+		}
+		fmt.Printf("[bridge] codigo de pareamento: %s\n", codigo)
+		json.NewEncoder(w).Encode(map[string]any{"success": true, "code": codigo})
+	})
+
 	http.HandleFunc("/api/send", func(w http.ResponseWriter, r *http.Request) {
 		// Only allow POST requests
 		if r.Method != http.MethodPost {
