@@ -120,6 +120,21 @@ func NewMessageStore() (*MessageStore, error) {
 			labeled INTEGER,
 			PRIMARY KEY (label_id, chat_jid)
 		);
+
+		-- Opcoes clicaveis dos menus interativos (lista, botao, template, native flow).
+		-- Sem isto nao da' para RESPONDER um bot: ele espera o ID da opcao, nao o rotulo.
+		CREATE TABLE IF NOT EXISTS message_options (
+			message_id TEXT,
+			chat_jid TEXT,
+			idx INTEGER,
+			kind TEXT,
+			option_id TEXT,
+			title TEXT,
+			description TEXT,
+			section TEXT,
+			params_json TEXT,
+			PRIMARY KEY (message_id, chat_jid, idx)
+		);
 	`)
 	if err != nil {
 		db.Close()
@@ -487,6 +502,14 @@ func extractTextContent(msg *waProto.Message) string {
 		return lst.GetTitle()
 	} else if tpl := msg.GetTemplateButtonReplyMessage(); tpl != nil {
 		return tpl.GetSelectedDisplayText()
+	}
+
+	// MENU INTERATIVO. Lista, botoes, template e native flow chegam sem texto nenhum, e ate'
+	// 12/09/2026 o bridge gravava content vazio: do lado de ca' o bot parecia ter travado, e
+	// foi exatamente o que aconteceu com o atendimento da Localiza. Aqui o menu vira texto
+	// numerado, e as opcoes com seus IDs sao gravadas em message_options por handleMessage.
+	if opts := extractMenuOptions(msg); len(opts) > 0 {
+		return renderMenu(msg, opts)
 	}
 
 	// Native WhatsApp events. This is the gap behind lharries/whatsapp-mcp#310: the event is
@@ -922,6 +945,16 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 	if err != nil {
 		logger.Warnf("Failed to store message: %v", err)
 	} else {
+		// Guarda as opcoes clicaveis do menu, com os IDs que o bot espera de volta.
+		// Falha aqui nao derruba nada: a mensagem ja' foi gravada, isto e' so' o indice das
+		// opcoes para o /api/select-option poder escolher por numero depois.
+		if opts := extractMenuOptions(msg.Message); len(opts) > 0 {
+			if e := messageStore.StoreMenuOptions(msg.Info.ID, chatJID, opts); e != nil {
+				logger.Warnf("Failed to store menu options: %v", e)
+			} else {
+				logger.Infof("Menu com %d opcoes guardado (%s)", len(opts), msg.Info.ID)
+			}
+		}
 		// Store the real direct_path from the proto (needed for reliable media download)
 		if mediaType != "" {
 			if dp := extractDirectPath(msg.Message); dp != "" {
@@ -1253,6 +1286,60 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 			resp.Message = fmt.Sprintf("Message sent to %s", req.Recipient)
 		}
 		json.NewEncoder(w).Encode(resp)
+	})
+
+	// Clica numa opcao de menu interativo, que e' como bot de empresa conversa.
+	//
+	// Nasceu em 12/09/2026 no atendimento da Localiza: o menu deles chega como mensagem
+	// interativa, o bridge gravava content vazio, e responder com o texto da opcao devolvia
+	// "Desculpe, nao entendi". O bot espera o ID da opcao num tipo de mensagem proprio.
+	//
+	// Corpo: {"chat_jid": "...", "option": 2}. O message_id e' opcional, e sem ele vale o
+	// ULTIMO menu recebido no chat, que e' o caso normal. Em vez do indice tambem aceita
+	// "option_id" ou "title".
+	http.HandleFunc("/api/select-option", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req SelectOptionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request format", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		id, titulo, err := selecionaOpcao(client, messageStore, req)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(SendMessageResponse{Success: false, Message: err.Error()})
+			return
+		}
+		fmt.Printf("Opcao de menu escolhida: %q em %s\n", titulo, req.ChatJID)
+		json.NewEncoder(w).Encode(SendMessageResponse{
+			Success: true, MessageID: id,
+			Message: fmt.Sprintf("Escolhido %q em %s", titulo, req.ChatJID),
+		})
+	})
+
+	// Lista as opcoes do menu recebido, para saber o que da' para clicar antes de clicar.
+	// GET /api/menu-options?chat_jid=...&message_id=... (message_id opcional)
+	http.HandleFunc("/api/menu-options", func(w http.ResponseWriter, r *http.Request) {
+		chatJID := r.URL.Query().Get("chat_jid")
+		w.Header().Set("Content-Type", "application/json")
+		if chatJID == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{"success": false,
+				"message": "chat_jid e' obrigatorio"})
+			return
+		}
+		id, opts, err := messageStore.GetMenuOptions(r.URL.Query().Get("message_id"), chatJID)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]any{"success": false, "message": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"success": true,
+			"message_id": id, "options": opts})
 	})
 
 	// Apaga para todos, ou edita, uma mensagem que a gente mesmo mandou.
