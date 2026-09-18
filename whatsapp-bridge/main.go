@@ -121,6 +121,17 @@ func NewMessageStore() (*MessageStore, error) {
 			PRIMARY KEY (label_id, chat_jid)
 		);
 
+		-- O protobuf cru do menu recebido. Parece redundante, mas nao e': a resposta a uma
+		-- opcao tem que CITAR a mensagem original inteira dentro do ContextInfo. Sem o
+		-- QuotedMessage o servidor recusa o stanza com erro 479, "smax-invalid". Guardar so' o
+		-- texto nao basta, porque o que vai no ContextInfo e' o proto.
+		CREATE TABLE IF NOT EXISTS message_raw (
+			message_id TEXT,
+			chat_jid TEXT,
+			proto BLOB,
+			PRIMARY KEY (message_id, chat_jid)
+		);
+
 		-- Opcoes clicaveis dos menus interativos (lista, botao, template, native flow).
 		-- Sem isto nao da' para RESPONDER um bot: ele espera o ID da opcao, nao o rotulo.
 		CREATE TABLE IF NOT EXISTS message_options (
@@ -954,6 +965,11 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			} else {
 				logger.Infof("Menu com %d opcoes guardado (%s)", len(opts), msg.Info.ID)
 			}
+			// O proto cru tambem, porque a resposta precisa CITAR a mensagem original
+			// inteira. Sem isso o servidor recusa com 479, "smax-invalid".
+			if e := messageStore.StoreRawMessage(msg.Info.ID, chatJID, msg.Message); e != nil {
+				logger.Warnf("Failed to store raw menu proto: %v", e)
+			}
 		}
 		// Store the real direct_path from the proto (needed for reliable media download)
 		if mediaType != "" {
@@ -1184,6 +1200,9 @@ func extractDirectPathFromURL(url string) string {
 
 // Start a REST API server to expose the WhatsApp client functionality
 func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port int) {
+	// grupo, participante e checagem de numero; ficam em grupos.go
+	registrarRotasGrupo()
+
 	// Handler for sending messages
 	http.HandleFunc("/api/sync-labels", func(w http.ResponseWriter, r *http.Request) {
 		c := globalClient
