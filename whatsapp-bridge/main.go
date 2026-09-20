@@ -1483,20 +1483,25 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 }
 
 func main() {
-	// cwd = the exe folder, since store/, bridge.log and the icon use relative paths
-	if exe, err := os.Executable(); err == nil {
-		os.Chdir(filepath.Dir(exe))
-	}
+	// cwd = a pasta de dados, ja' que store/, bridge.log e qr.png usam caminho relativo.
+	// Por padrao e' a pasta do exe, igual a antes; WA_BRIDGE_DATA move tudo de lugar e e'
+	// isso que permite duas contas na mesma maquina. Ver instancia.go
+	os.Chdir(pastaDeDados())
 	// a -H=windowsgui build has no console: stdout/stderr go to bridge.log
 	rotateLog() // trim the log if a previous session left it oversized
 	if f, ferr := os.OpenFile("bridge.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); ferr == nil {
 		os.Stdout = f
 		os.Stderr = f
 	}
-	// single instance: if port 8080 already answers, another bridge is running -> exit
-	if c, derr := net.DialTimeout("tcp", "127.0.0.1:8080", time.Second); derr == nil {
+	// instancia unica POR PORTA: se a porta desta instancia ja' responde, ja' ha' um bridge
+	// igual rodando e este sai. Com WA_BRIDGE_PORT diferente, as duas convivem
+	porta := portaDoBridge()
+	if c, derr := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", porta), time.Second); derr == nil {
 		c.Close()
 		return
+	}
+	if n := nomeDaInstancia(); n != "" {
+		fmt.Printf("[bridge] instancia %q na porta %d, dados em %s\n", n, porta, pastaDeDados())
 	}
 	// periodic trim: every 5 min, cut the log if it grew past the cap
 	go func() {
@@ -1511,8 +1516,8 @@ func main() {
 
 func onReady() {
 	systray.SetIcon(iconData)
-	systray.SetTooltip("WhatsApp Bridge")
-	mTitle := systray.AddMenuItem("WhatsApp Bridge", "")
+	systray.SetTooltip(rotuloTray(""))
+	mTitle := systray.AddMenuItem(rotuloTray(""), "")
 	mTitle.Disable()
 	mStatus = systray.AddMenuItem("Status: starting...", "WhatsApp connection state")
 	mStatus.Disable()
@@ -1599,13 +1604,13 @@ func refreshStatus() {
 	switch {
 	case c != nil && c.Store.ID != nil && c.IsConnected():
 		mStatus.SetTitle("Status: CONNECTED (" + c.Store.ID.User + ")")
-		systray.SetTooltip("WhatsApp Bridge - connected")
+		systray.SetTooltip(rotuloTray("connected"))
 	case c != nil && c.Store.ID != nil:
 		mStatus.SetTitle("Status: disconnected, click Connect")
-		systray.SetTooltip("WhatsApp Bridge - disconnected (session still valid)")
+		systray.SetTooltip(rotuloTray("disconnected (session still valid)"))
 	default:
 		mStatus.SetTitle("Status: LOGGED OUT, click Connect to pair")
-		systray.SetTooltip("WhatsApp Bridge - logged out, scan the QR to pair")
+		systray.SetTooltip(rotuloTray("logged out, scan the QR to pair"))
 	}
 }
 
@@ -1865,7 +1870,7 @@ func runBridge() {
 
 	// Always start the REST server, even when logged out, so the tray and the API stay alive
 	// if the connection drops. Handlers check IsConnected() on every call.
-	startRESTServer(client, messageStore, 8080)
+	startRESTServer(client, messageStore, portaDoBridge())
 
 	// Refresh the tray Status item periodically.
 	go statusLoop()

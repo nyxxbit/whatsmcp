@@ -47,3 +47,6 @@ example-use.png*
 
 # Tooling
 .serena/
+
+# dados das instancias adicionais (banco, midia e log de outra conta)
+instancias/
