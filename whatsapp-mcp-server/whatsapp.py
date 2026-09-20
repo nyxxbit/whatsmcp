@@ -7,8 +7,21 @@ import requests
 import json
 import audio
 
-MESSAGES_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'whatsapp-bridge', 'store', 'messages.db')
-WHATSAPP_API_BASE_URL = "http://localhost:8080/api"
+import os
+
+# Duas variaveis de ambiente permitem apontar este MCP para OUTRA instancia do bridge, com
+# outra conta de WhatsApp. Sem elas, o comportamento e' exatamente o de antes.
+#
+#   WHATSAPP_MESSAGES_DB     caminho do messages.db     default: ../whatsapp-bridge/store
+#   WHATSAPP_API_BASE_URL    URL do bridge              default: http://localhost:8080/api
+#
+# As duas andam JUNTAS. Apontar o banco de uma conta para a API de outra le' as mensagens de
+# uma e envia pela outra, que e' o pior erro possivel aqui e nao da' nenhum aviso.
+_PADRAO_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
+                          'whatsapp-bridge', 'store', 'messages.db')
+MESSAGES_DB_PATH = os.environ.get("WHATSAPP_MESSAGES_DB") or _PADRAO_DB
+WHATSAPP_API_BASE_URL = (os.environ.get("WHATSAPP_API_BASE_URL")
+                         or "http://localhost:8080/api").rstrip("/")
 
 @dataclass
 class Message:
