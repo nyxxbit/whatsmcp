@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -259,25 +260,38 @@ func (store *MessageStore) GetDirectPath(id, chatJID string) string {
 	return ""
 }
 
-// telefonesDoVcard tira os numeros de um vCard de contato compartilhado.
+// telefonesDoVcard pulls the phone numbers out of a shared contact's vCard.
 //
-// Antes de 02/09/2026 o bridge guardava so' "[contact] Fulano" e o TELEFONE SE PERDIA. Quando
-// o Marcio mandou o contato do locador de plataforma de Piumhi, o numero nao estava em lugar
-// nenhum do banco e teve que ser pedido de novo. O nome sozinho nao serve para nada: o que se
-// faz com um contato compartilhado e' ligar para ele.
+// Before 2026-09-02 the bridge stored only "[contact] Name" and the number was lost. When a
+// platform rental contact was forwarded, the number was nowhere in the database and had to be
+// asked for again. A shared contact is only useful for calling it, so the number is the part
+// that matters.
 //
-// O vCard traz o telefone em linhas do tipo:
+// Phones come in lines such as
 //
 //	TEL;type=CELL;waid=553799830144:+55 37 9983-0144
 //
-// O waid e' o que interessa, porque ja' vem no formato do WhatsApp. Quando nao ha' waid, cai
-// para o numero cru depois dos dois-pontos.
+// waid is preferred because it is already in WhatsApp's format; without it, the raw number
+// after the last colon is used.
+//
+// Cards exported by WhatsApp itself group their properties, so the line reads
+//
+//	item1.TEL;waid=5519999999999:+55 19 99999-9999
+//
+// Matching only the start of the line, the "item1." group prefix hid the TEL and the number
+// was dropped exactly as before 2026-09-02. That happened again on 2026-09-24.
 func telefonesDoVcard(vcard string) []string {
 	vistos := map[string]bool{}
 	nums := []string{}
 	for _, linha := range strings.Split(vcard, "\n") {
 		linha = strings.TrimSpace(linha)
-		if !strings.HasPrefix(strings.ToUpper(linha), "TEL") {
+		prop := linha
+		if end := strings.IndexAny(prop, ";:"); end >= 0 {
+			if p := strings.LastIndex(prop[:end], "."); p >= 0 {
+				prop = prop[p+1:]
+			}
+		}
+		if !strings.HasPrefix(strings.ToUpper(prop), "TEL") {
 			continue
 		}
 		n := ""
@@ -294,7 +308,7 @@ func telefonesDoVcard(vcard string) []string {
 				n = linha[i+1:]
 			}
 		}
-		// deixa so' digito e o + inicial, que e' o que serve para discar ou montar JID
+		// keep digits and a leading +, which is what dialing or building a JID needs
 		limpo := strings.Builder{}
 		for k, r := range strings.TrimSpace(n) {
 			if r >= '0' && r <= '9' || (k == 0 && r == '+') {
@@ -306,14 +320,34 @@ func telefonesDoVcard(vcard string) []string {
 			nums = append(nums, s)
 		}
 	}
+	// last resort, for a card layout not seen yet: a waid anywhere in the card
+	if len(nums) == 0 {
+		for _, m := range anyWaid.FindAllStringSubmatch(vcard, -1) {
+			if !vistos[m[1]] {
+				vistos[m[1]] = true
+				nums = append(nums, m[1])
+			}
+		}
+	}
 	return nums
 }
 
-// formataContato junta o nome exibido com os telefones achados no vCard.
+var anyWaid = regexp.MustCompile(`(?i)waid=(\d{8,})`)
+
+// formataContato joins the display name with the phones found in the vCard.
+//
+// A contact that yields no number leaves the raw card in the log, truncated, so the next odd
+// layout can be fixed from what actually arrived instead of from a guess.
 func formataContato(nome, vcard string) string {
 	s := "[contact] " + nome
 	if tels := telefonesDoVcard(vcard); len(tels) > 0 {
 		s += " - " + strings.Join(tels, ", ")
+	} else if vcard != "" {
+		cru := strings.ReplaceAll(strings.ReplaceAll(vcard, "\r", ""), "\n", " | ")
+		if len(cru) > 600 {
+			cru = cru[:600]
+		}
+		fmt.Printf("[bridge] contact %q has no readable phone; vCard: %s\n", nome, cru)
 	}
 	return s
 }
