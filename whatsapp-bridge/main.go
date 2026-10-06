@@ -32,6 +32,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -1671,6 +1672,25 @@ func statusLoop() {
 //
 // So' tenta quando a sessao ainda e' valida (Store.ID != nil). Deslogado precisa de QR, e QR
 // depende do celular do Gabriel; nesse caso o loop fica quieto para nao gastar tentativa a toa.
+// refreshWAVersion makes the bridge announce the web client version that web.whatsapp.com is serving
+// right now. WhatsApp raises the minimum version every few months and turns older clients away with
+// 405 "Client outdated", and the version compiled into whatsmeow ages with the library: on 2026-10-05
+// at 19:29 that kept the bridge off the air until the next morning, with every reconnect refused. It
+// runs at startup and again on every ClientOutdated, so the reconnect loop retries with the new
+// version. If the lookup fails the compiled-in version stays.
+func refreshWAVersion() {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	agora := time.Now().Format("2006-01-02 15:04:05")
+	v, err := whatsmeow.GetLatestVersion(ctx, nil)
+	if err != nil {
+		fmt.Println(agora, "[bridge] versao do WhatsApp Web nao veio, fica a da biblioteca:", err)
+		return
+	}
+	store.SetWAVersion(*v)
+	fmt.Println(agora, "[bridge] versao do WhatsApp Web:", v.String())
+}
+
 func reconnectLoop(c *whatsmeow.Client) {
 	const esperaMin, esperaMax = 30 * time.Second, 5 * time.Minute
 	espera := esperaMin
@@ -1839,7 +1859,8 @@ func runBridge() {
 		}
 	}
 
-	// Create client instance
+	// Create client instance, announcing the web version WhatsApp accepts today
+	refreshWAVersion()
 	client := whatsmeow.NewClient(deviceStore, logger)
 	if client == nil {
 		logger.Errorf("Failed to create WhatsApp client")
@@ -1891,6 +1912,10 @@ func runBridge() {
 			fmt.Println(time.Now().Format("2006-01-02 15:04:05"),
 				"[bridge] DISCONNECTED, o reconnectLoop vai tentar de novo")
 			refreshStatus()
+		case *events.ClientOutdated:
+			// 405: the session is still valid, only the announced version is too old
+			logger.Warnf("Client outdated, fetching the current WhatsApp Web version")
+			refreshWAVersion()
 		case *events.LoggedOut:
 			logger.Warnf("Device logged out, please scan QR code to log in again")
 			fmt.Println(time.Now().Format("2006-01-02 15:04:05"), "[bridge] LOGGED OUT, scan the QR to reconnect")
