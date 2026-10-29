@@ -15,8 +15,25 @@ package main
 //	TemplateMessage     -> TemplateButtonReplyMessage  (id + indice)
 //	InteractiveMessage  -> InteractiveResponseMessage  (name + paramsJSON)
 //
-// Em todos, a resposta tem que citar a mensagem original no ContextInfo (StanzaID e
-// Participant). Sem isso o servidor aceita, mas o bot nao casa a resposta com a pergunta.
+// Em todos, a resposta tem que citar a mensagem original no ContextInfo (StanzaID,
+// QuotedMessage, RemoteJID e, em grupo, Participant).
+//
+// ## O QUE FUNCIONA HOJE, E O QUE NAO
+//
+// **Ler funciona.** O menu deixou de chegar invisivel: vira texto numerado e as opcoes ficam
+// em message_options com os IDs. Foi o que resolveu o caso real, porque com o rotulo exato na
+// mao da' para responder por TEXTO, e o bot aceita. Em 12/09/2026 "Estou com uma emergencia",
+// copiado do menu, entrou de primeira; antes disso eu chutava o nome da opcao e errava.
+//
+// **Clicar funciona desde 28/10/2026.** Ate ali o servidor recusava toda resposta com **479,
+// "Invalid stanza sent (smax-invalid)"**, com e sem QuotedMessage e RemoteJID, no JID do numero e
+// no @lid. O culpado era o no' que o whatsmeow poe no stanza: `<biz><list_response/></biz>` (ou
+// `buttons_response`). Sem ele o servidor aceita, e o bot da Localiza seguiu o fluxo tanto no
+// botao "Sim" quanto na lista ("Ja devolvi o carro" -> pediu o CPF/CNPJ). O whatsmeow vai
+// remendado em third_party/whatsmeow (ver PATCH.md), pelo `replace` do go.mod.
+//
+// Mandar o rowID cru como texto nao resolve: os rowID da Localiza sao "1".."5" e o bot responde
+// "Desculpe, nao entendi". Por texto ele so' aceita o TITULO exato, que segue valendo como reserva.
 
 import (
 	"context"
@@ -166,6 +183,33 @@ func (store *MessageStore) StoreMenuOptions(id, chatJID string, opts []MenuOptio
 	return tx.Commit()
 }
 
+// StoreRawMessage guarda o protobuf cru do menu, que e' o que a resposta precisa citar.
+func (store *MessageStore) StoreRawMessage(id, chatJID string, msg *waProto.Message) error {
+	b, err := proto.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	_, err = store.db.Exec(
+		"INSERT OR REPLACE INTO message_raw (message_id, chat_jid, proto) VALUES (?,?,?)",
+		id, chatJID, b)
+	return err
+}
+
+// GetRawMessage devolve o proto guardado, ou nil se nao houver.
+func (store *MessageStore) GetRawMessage(id, chatJID string) *waProto.Message {
+	var b []byte
+	if err := store.db.QueryRow(
+		"SELECT proto FROM message_raw WHERE message_id=? AND chat_jid=?",
+		id, chatJID).Scan(&b); err != nil || len(b) == 0 {
+		return nil
+	}
+	var m waProto.Message
+	if proto.Unmarshal(b, &m) != nil {
+		return nil
+	}
+	return &m
+}
+
 // GetMenuOptions le' as opcoes de uma mensagem. Com id vazio, pega o menu MAIS RECENTE do chat,
 // que e' o caso normal: o bot acabou de perguntar e eu quero responder.
 func (store *MessageStore) GetMenuOptions(id, chatJID string) (string, []MenuOption, error) {
@@ -239,8 +283,19 @@ func escolheOpcao(opts []MenuOption, indice int, optID, titulo string) (*MenuOpt
 }
 
 // montaResposta monta a mensagem de resposta do tipo certo para a opcao escolhida.
-func montaResposta(o *MenuOption, stanzaID string, participant string) *waProto.Message {
+func montaResposta(o *MenuOption, stanzaID, participant string, chatJID string,
+	citada *waProto.Message) *waProto.Message {
+	// O ContextInfo tem que citar a mensagem original INTEIRA. So' o StanzaID nao basta: sem
+	// o QuotedMessage o servidor devolve 479, "Invalid stanza sent (smax-invalid)", que foi
+	// exatamente o que aconteceu na primeira tentativa com a Localiza em 12/09/2026.
 	ctx := &waProto.ContextInfo{StanzaID: proto.String(stanzaID)}
+	if citada != nil {
+		ctx.QuotedMessage = citada
+	}
+	if chatJID != "" {
+		ctx.RemoteJID = proto.String(chatJID)
+	}
+	// Participant so' existe em grupo. Em conversa direta, o proprio remetente.
 	if participant != "" {
 		ctx.Participant = proto.String(participant)
 	}
@@ -332,7 +387,12 @@ func selecionaOpcao(client *whatsmeow.Client, store *MessageStore,
 		}
 	}
 
-	msg := montaResposta(o, msgID, participant)
+	citada := store.GetRawMessage(msgID, req.ChatJID)
+	if participant == "" {
+		// Em conversa de um para um o participant e' o proprio bot, que e' o dono do chat.
+		participant = chat.String()
+	}
+	msg := montaResposta(o, msgID, participant, chat.String(), citada)
 	if msg == nil {
 		return "", "", fmt.Errorf("tipo de opcao desconhecido: %s", o.Kind)
 	}

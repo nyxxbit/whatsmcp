@@ -119,7 +119,7 @@ func TestMontaRespostaDoTipoCerto(t *testing.T) {
 	const stanza = "3EB0ABC123"
 
 	lista := &MenuOption{Index: 1, Kind: "list", OptionID: "rev_man", Title: "Revisão"}
-	m := montaResposta(lista, stanza, "")
+	m := montaResposta(lista, stanza, "", "", nil)
 	lr := m.GetListResponseMessage()
 	if lr == nil {
 		t.Fatal("lista tinha que virar ListResponseMessage")
@@ -136,27 +136,27 @@ func TestMontaRespostaDoTipoCerto(t *testing.T) {
 	}
 
 	btn := &MenuOption{Index: 1, Kind: "button", OptionID: "sim", Title: "Sim"}
-	br := montaResposta(btn, stanza, "").GetButtonsResponseMessage()
+	br := montaResposta(btn, stanza, "", "", nil).GetButtonsResponseMessage()
 	if br == nil || br.GetSelectedButtonID() != "sim" ||
 		br.GetSelectedDisplayText() != "Sim" {
 		t.Errorf("botao mal montado: %+v", br)
 	}
 
 	tpl := &MenuOption{Index: 3, Kind: "template", OptionID: "t3", Title: "Terceiro"}
-	tr := montaResposta(tpl, stanza, "").GetTemplateButtonReplyMessage()
+	tr := montaResposta(tpl, stanza, "", "", nil).GetTemplateButtonReplyMessage()
 	if tr == nil || tr.GetSelectedID() != "t3" || tr.GetSelectedIndex() != 2 {
 		t.Errorf("template mal montado, o indice e' 0-based: %+v", tr)
 	}
 
 	nf := &MenuOption{Index: 1, Kind: "nativeflow", OptionID: "single_select",
 		Title: "Ver", ParamsJSON: `{"a":1}`}
-	ir := montaResposta(nf, stanza, "").GetInteractiveResponseMessage()
+	ir := montaResposta(nf, stanza, "", "", nil).GetInteractiveResponseMessage()
 	if ir == nil || ir.GetNativeFlowResponseMessage().GetName() != "single_select" ||
 		ir.GetNativeFlowResponseMessage().GetParamsJSON() != `{"a":1}` {
 		t.Errorf("native flow mal montado: %+v", ir)
 	}
 
-	if montaResposta(&MenuOption{Kind: "coisa_nova"}, stanza, "") != nil {
+	if montaResposta(&MenuOption{Kind: "coisa_nova"}, stanza, "", "", nil) != nil {
 		t.Error("tipo desconhecido tem que devolver nil, nao mandar lixo")
 	}
 }
@@ -164,13 +164,36 @@ func TestMontaRespostaDoTipoCerto(t *testing.T) {
 // Em grupo a resposta precisa do participant; em conversa de um para um, nao.
 func TestParticipantSoQuandoTem(t *testing.T) {
 	o := &MenuOption{Kind: "list", OptionID: "x", Title: "X"}
-	semGrupo := montaResposta(o, "ID1", "").GetListResponseMessage().GetContextInfo()
+	semGrupo := montaResposta(o, "ID1", "", "", nil).GetListResponseMessage().GetContextInfo()
 	if semGrupo.Participant != nil {
 		t.Error("em conversa direta o participant tem que ficar de fora")
 	}
-	comGrupo := montaResposta(o, "ID1", "5517999@s.whatsapp.net").
+	comGrupo := montaResposta(o, "ID1", "5517999@s.whatsapp.net", "", nil).
 		GetListResponseMessage().GetContextInfo()
 	if comGrupo.GetParticipant() != "5517999@s.whatsapp.net" {
 		t.Errorf("participant nao foi: %q", comGrupo.GetParticipant())
+	}
+}
+
+// O 479 que a Localiza devolveu em 12/09: resposta sem citar a mensagem original e' recusada
+// pelo servidor como stanza invalido. Este teste guarda o motivo de o QuotedMessage existir.
+func TestRespostaCitaAMensagemOriginal(t *testing.T) {
+	original := listaExemplo()
+	o := &MenuOption{Index: 2, Kind: "list", OptionID: "assist", Title: "Assistência"}
+
+	ctx := montaResposta(o, "STANZA1", "558009792020@s.whatsapp.net",
+		"558009792020@s.whatsapp.net", original).GetListResponseMessage().GetContextInfo()
+
+	if ctx.GetQuotedMessage() == nil {
+		t.Fatal("sem QuotedMessage o servidor devolve 479 smax-invalid")
+	}
+	if ctx.GetQuotedMessage().GetListMessage().GetTitle() != "Localiza" {
+		t.Errorf("citou a mensagem errada: %+v", ctx.GetQuotedMessage())
+	}
+	if ctx.GetRemoteJID() != "558009792020@s.whatsapp.net" {
+		t.Errorf("RemoteJID faltando: %q", ctx.GetRemoteJID())
+	}
+	if ctx.GetStanzaID() != "STANZA1" {
+		t.Errorf("StanzaID faltando: %q", ctx.GetStanzaID())
 	}
 }
