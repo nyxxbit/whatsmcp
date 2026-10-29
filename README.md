@@ -51,11 +51,14 @@ The rewrite was written before that work landed and has not been updated since. 
 
 ## Running the bridge
 
-```bash
+```powershell
 cd whatsapp-bridge
-go build -o whatsapp-bridge .
-./whatsapp-bridge
+.uild.ps1
 ```
+
+Build with `build.ps1`, not a bare `go build`: it passes `-H=windowsgui`, checks that the binary came out as a GUI
+app and swaps the running one, rolling back if the new binary does not come up. A bare `go build` gives a console
+app, and Windows then opens a black CMD window every time the logon task starts the bridge.
 
 The bridge runs as a **system tray application on Windows** and writes its output to `bridge.log` rather than the terminal, so an empty console is expected. On first run it writes the pairing QR to `qr.png` and tries to open it in the default image viewer; if nothing opens, open that file manually and scan it from WhatsApp under *Linked devices*.
 
