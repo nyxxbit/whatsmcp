@@ -82,9 +82,13 @@ func soPost(w http.ResponseWriter, r *http.Request) bool {
 func grupoResumo(g *types.GroupInfo) map[string]any {
 	participantes := make([]map[string]any, 0, len(g.Participants))
 	for _, p := range g.Participants {
-		participantes = append(participantes, map[string]any{
-			"jid": p.JID.String(), "admin": p.IsAdmin, "super_admin": p.IsSuperAdmin,
-		})
+		item := map[string]any{"jid": p.JID.String(), "admin": p.IsAdmin, "super_admin": p.IsSuperAdmin}
+		// quem o WhatsApp recusou (403: a privacidade nao deixa adicionar) volta com o erro; sem isto o
+		// group-create dizia "success" e a pessoa ficava de fora calada (a Vera, 30/10/2026)
+		if p.Error != 0 {
+			item["error"] = p.Error
+		}
+		participantes = append(participantes, item)
 	}
 	return map[string]any{
 		"jid": g.JID.String(), "name": g.Name, "topic": g.Topic,
