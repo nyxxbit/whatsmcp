@@ -239,6 +239,23 @@ func (store *MessageStore) StoreMessage(id, chatJID, sender, content string, tim
 	return err
 }
 
+// FillHistoryMessage handles a history sync message the database already has: it keeps the row
+// (and its rowid) and only fills in content that is still empty. Re-storing it with INSERT OR REPLACE
+// deleted the row and wrote it back under a new rowid, so the caption and the direct_path were lost
+// and the watcher took the whole history as new messages (re-pairing on 02/11/2026, 104k rows).
+// Returns false when the message is not stored yet.
+func (store *MessageStore) FillHistoryMessage(id, chatJID, content string) bool {
+	var n int
+	if store.db.QueryRow("SELECT 1 FROM messages WHERE id = ? AND chat_jid = ?", id, chatJID).Scan(&n) != nil {
+		return false
+	}
+	if content != "" {
+		store.db.Exec("UPDATE messages SET content = ? WHERE id = ? AND chat_jid = ? AND COALESCE(content, '') = ''",
+			content, id, chatJID)
+	}
+	return true
+}
+
 // Store the real direct_path (from proto) for a media message
 func (store *MessageStore) StoreDirectPath(id, chatJID, directPath string) error {
 	if directPath == "" {
@@ -2075,14 +2092,10 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 					continue
 				}
 
-				// Extract text content
+				// Same extraction as live messages, captions included
 				var content string
 				if msg.Message.Message != nil {
-					if conv := msg.Message.Message.GetConversation(); conv != "" {
-						content = conv
-					} else if ext := msg.Message.Message.GetExtendedTextMessage(); ext != nil {
-						content = ext.GetText()
-					}
+					content = extractTextContent(msg.Message.Message)
 				}
 
 				// Extract media info
@@ -2127,6 +2140,9 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 				msgID := ""
 				if msg.Message.Key != nil && msg.Message.Key.ID != nil {
 					msgID = *msg.Message.Key.ID
+				}
+				if messageStore.FillHistoryMessage(msgID, chatJID, content) {
+					continue
 				}
 
 				// Get message timestamp
