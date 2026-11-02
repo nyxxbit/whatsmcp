@@ -109,6 +109,9 @@ func NewMessageStore() (*MessageStore, error) {
 			FOREIGN KEY (chat_jid) REFERENCES chats(jid)
 		);
 
+		-- every read is per chat and by time; without it each one scans the whole WhatsApp
+		CREATE INDEX IF NOT EXISTS idx_messages_chat_time ON messages (chat_jid, timestamp);
+
 		CREATE TABLE IF NOT EXISTS labels (
 			label_id TEXT PRIMARY KEY,
 			name TEXT,
@@ -1522,16 +1525,40 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		})
 	})
 
-	// Start the server
-	serverAddr := fmt.Sprintf(":%d", port)
-	fmt.Printf("Starting REST API server on %s...\n", serverAddr)
-
-	// Run server in a goroutine so it doesn't block
-	go func() {
-		if err := http.ListenAndServe(serverAddr, nil); err != nil {
+	// Loopback only: /api sends as the owner and /mcp reads the whole WhatsApp, so the network
+	// never gets an answer. Both stacks, because localhost may resolve to ::1 first.
+	h := guardLocal(http.DefaultServeMux)
+	for _, addr := range []string{fmt.Sprintf("127.0.0.1:%d", port), fmt.Sprintf("[::1]:%d", port)} {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
 			fmt.Printf("REST API server error: %v\n", err)
+			continue
 		}
-	}()
+		fmt.Printf("Starting REST API server on %s...\n", addr)
+		go func() {
+			if err := http.Serve(ln, h); err != nil {
+				fmt.Printf("REST API server error: %v\n", err)
+			}
+		}()
+	}
+}
+
+// guardLocal turns away what a web page can make the browser send to localhost: a cross-origin
+// request, and a DNS rebinding one, whose Host is the attacker's name resolving to 127.0.0.1.
+// Scripts and Claude Code send neither.
+func guardLocal(next http.Handler) http.Handler {
+	next = http.NewCrossOriginProtection().Handler(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			http.Error(w, "Forbidden host", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func main() {
