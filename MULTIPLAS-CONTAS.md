@@ -13,7 +13,7 @@ pasta do próprio exe, exatamente como antes.
 |---|---|
 | `whatsapp-bridge/instancia.go` | **novo.** Lê as três variáveis e monta o rótulo da bandeja |
 | `whatsapp-bridge/main.go` | `chdir` vai para a pasta de dados; a trava de instância única e o servidor REST usam a porta configurada; a bandeja mostra o apelido |
-| `whatsapp-mcp-server/whatsapp.py` | `MESSAGES_DB_PATH` e `WHATSAPP_API_BASE_URL` passam a aceitar variável de ambiente |
+| `whatsapp-mcp-server/whatsapp.py` | `MESSAGES_DB_PATH` e `WHATSAPP_API_BASE_URL` passavam a aceitar variável de ambiente. Removido em 02/11/2026, quando o MCP passou para dentro do bridge |
 | `scripts/instancia.ps1` | **novo.** Sobe, reporta ou para uma instância adicional |
 | `.gitignore` | `instancias/` fica de fora do repositório: são mensagens de outra pessoa |
 
@@ -54,30 +54,18 @@ Start-Process C:\Users\gabri\whatsapp-mcp\whatsapp-bridge\whatsapp-bridge.exe
 
 ### Apontar um MCP para essa conta
 
-No `claude_desktop_config.json` (ou equivalente do cliente), o servidor MCP da conta nova leva
-as duas variáveis:
+Desde 02/11/2026 o MCP mora dentro do bridge, em `/mcp` na porta de cada instância. A conta nova
+se registra pela porta dela:
 
-```json
-{
-  "mcpServers": {
-    "whatsapp-primo": {
-      "command": "uv",
-      "args": ["--directory", "C:\\Users\\gabri\\whatsapp-mcp\\whatsapp-mcp-server",
-               "run", "main.py"],
-      "env": {
-        "WHATSAPP_API_BASE_URL": "http://localhost:8081/api",
-        "WHATSAPP_MESSAGES_DB": "C:\\Users\\gabri\\whatsapp-mcp\\instancias\\primo\\store\\messages.db"
-      }
-    }
-  }
-}
+```
+claude mcp add --transport http whatsapp-primo http://127.0.0.1:8081/mcp
 ```
 
-O MCP da conta principal **não leva `env` nenhum** e continua na 8080.
+A conta principal continua em `http://127.0.0.1:8080/mcp`.
 
-> [!critico] **As duas variáveis andam juntas, sempre.** Apontar o banco de uma conta para a API
-> da outra faz o assistente **ler as mensagens de uma e enviar pela outra**. É o pior erro
-> possível aqui, não dá aviso nenhum e só aparece quando a mensagem já chegou na pessoa errada.
+O risco que este documento avisava, o de ler o banco de uma conta e enviar pela outra, acabou: quem
+lê e quem envia é o mesmo processo. O que sobra conferir é a porta de cada registro, com
+`claude mcp list`.
 
 ## Conferir que está tudo separado
 
