@@ -1738,6 +1738,17 @@ func reconnectLoop(c *whatsmeow.Client) {
 // doQRPair runs QR pairing: writes qr.png, opens it and waits for the scan. Used both at
 // startup (when logged out) and by the tray's Connect button.
 func doQRPair(client *whatsmeow.Client) {
+	// A new pairing brings the whole history again, so a consistent copy of the message database
+	// goes to store/_copias first (the history sync of 02/11/2026 rewrote 100k rows).
+	if globalStore != nil {
+		copia := filepath.Join("store", "_copias", "messages_before_pairing_"+time.Now().Format("2006-01-02_1504")+".db")
+		os.MkdirAll(filepath.Dir(copia), 0o755)
+		if _, err := globalStore.db.Exec("VACUUM INTO ?", copia); err != nil {
+			fmt.Printf("[bridge] copy before pairing failed: %v\n", err)
+		} else {
+			fmt.Printf("[bridge] copy before pairing: %s\n", copia)
+		}
+	}
 	qrChan, err := client.GetQRChannel(context.Background())
 	if err != nil {
 		fmt.Printf("Failed to open the QR channel: %v\n", err)
