@@ -841,11 +841,17 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 		msg.Conversation = proto.String(message)
 	}
 
+	// Asked before the send is stored: a 1:1 chat this send starts gets muted (mute.go)
+	starts := startsChat(chatTwins(context.Background(), client, recipientJID), storedMessages)
+
 	// Send message
 	resp, err := client.SendMessage(context.Background(), recipientJID, msg)
 
 	if err != nil {
 		return false, fmt.Sprintf("Error sending message: %v", err)
+	}
+	if starts {
+		go muteNewChat(client, recipientJID)
 	}
 
 	// Guarda o que a gente mesmo mandou, com o ID que o servidor devolveu.
