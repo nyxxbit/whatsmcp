@@ -2,8 +2,7 @@ package main
 
 // Name a contact the way WhatsApp Web's "Edit contact" does: an app state "contact" mutation, which
 // every linked device applies, and with save_on_phone the phone also writes the name to its own
-// address book. Gabriel, 05/11/2026: rename a bank manager to "Alex Carter" so it shows that way
-// on his phone too.
+// address book. Asked for on 2026-11-05, so a contact named here shows the same name on the phone.
 //
 //	POST /api/contact-name {"jid": "5511999990003", "name": "Alex Carter"}
 //	POST /api/contact-name {"jid": "100000000000003@lid", "name": "Alex Carter", "save_on_phone": false}
